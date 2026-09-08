@@ -40,11 +40,20 @@ import java.io.File
 @Composable
 fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+    val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
     var showAccountDialog by remember { mutableStateOf(false) }
     var editingAccount by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     var showMkdir by remember { mutableStateOf(false) }
     var mkdirName by remember { mutableStateOf("") }
     var showSortMenu by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.message) {
+        state.message?.let {
+            snackbarHostState.showSnackbar(it)
+            vm.clearMessage()
+        }
+    }
 
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
@@ -97,8 +106,16 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         }
     }
 
-    // 系统返回键：回到上一层目录
-    BackHandler(enabled = state.currentPath != "/") { vm.goUp() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // 系统返回键：如果处于多选模式则取消多选；否则回到上一层目录
+    BackHandler(enabled = state.currentPath != "/" || state.multiSelectMode) {
+        if (state.multiSelectMode) {
+            vm.clearSelection()
+        } else {
+            vm.goUp()
+        }
+    }
 
     // 面包屑：/a/b/c -> [root, a, b, c]
     val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
@@ -133,10 +150,50 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            if (state.currentAccount != null) {
+            if (state.currentAccount != null && !state.multiSelectMode) {
                 FloatingActionButton(onClick = { showMkdir = true; mkdirName = "" }) {
                     Icon(Icons.Filled.CreateNewFolder, "新建文件夹")
+                }
+            }
+        },
+        bottomBar = {
+            if (state.multiSelectMode) {
+                BottomAppBar {
+                    TextButton(onClick = { vm.selectAll() }) {
+                        Text("全选")
+                    }
+                    Button(onClick = { vm.copySelected() }) {
+                        Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("复制 (${state.selected.size})")
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { vm.deleteSelected() }) {
+                        Icon(Icons.Filled.Delete, "删除")
+                    }
+                    TextButton(onClick = { vm.clearSelection() }) {
+                        Text("取消")
+                    }
+                }
+            } else if (clipboardItems.isNotEmpty()) {
+                BottomAppBar {
+                    Text(
+                        "剪贴板: ${clipboardItems.size} 项",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 12.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Button(onClick = { vm.pasteHere(context) }) {
+                        Icon(Icons.Filled.ContentPaste, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("粘贴到此处")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { com.example.myfile.core.TransferClipboard.clear() }) {
+                        Text("清空")
+                    }
                 }
             }
         }
@@ -365,8 +422,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             videoProgress = progressMap[videoKey]?.let {
                                 if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
                             },
+                            isSelected = entry.path in state.selected,
                             onClick = {
-                                if (entry.isDirectory) {
+                                if (state.multiSelectMode) {
+                                    vm.toggleSelect(entry.path)
+                                } else if (entry.isDirectory) {
                                     vm.open(entry)
                                 } else if (category == "image") {
                                     val idx = imageEntries.indexOfFirst { it.path == entry.path }
@@ -376,8 +436,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     openEntry(forceChooser = false)
                                 }
                             },
+                            onLongClick = { vm.toggleSelect(entry.path) },
                             trailing = {
-                                if (!entry.isDirectory) {
+                                if (!entry.isDirectory && !state.multiSelectMode) {
                                     var showMenu by remember { mutableStateOf(false) }
                                     IconButton(onClick = { showMenu = true }) {
                                         Icon(Icons.Filled.MoreVert, "更多")

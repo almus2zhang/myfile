@@ -292,6 +292,20 @@ class WebDavClient(
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 }
     }
 
+    fun copy(from: String, to: String): Boolean {
+        val req = requestBuilder("COPY", from)
+            .header("Destination", fullUrl(to))
+            .header("Overwrite", "T")
+            .build()
+        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+    }
+
+    fun uploadFile(path: String, file: java.io.File): Boolean {
+        val body = okhttp3.RequestBody.create("application/octet-stream".toMediaType(), file)
+        val req = requestBuilder("PUT", path).put(body).build()
+        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+    }
+
     fun upload(path: String, bytes: ByteArray): Boolean {
         val req = requestBuilder("PUT", path)
             .put(bytes.toRequestBody("application/octet-stream".toMediaType()))

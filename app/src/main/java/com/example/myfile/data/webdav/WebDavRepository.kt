@@ -58,4 +58,10 @@ class WebDavRepository(
 
     suspend fun upload(account: WebDavAccount, path: String, bytes: ByteArray): Boolean =
         withContext(Dispatchers.IO) { clientFactory(account).upload(path, bytes) }
+
+    suspend fun copy(account: WebDavAccount, from: String, to: String): Boolean =
+        withContext(Dispatchers.IO) { clientFactory(account).copy(from, to) }
+
+    suspend fun uploadFile(account: WebDavAccount, path: String, file: java.io.File): Boolean =
+        withContext(Dispatchers.IO) { clientFactory(account).uploadFile(path, file) }
 }

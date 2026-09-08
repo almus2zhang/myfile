@@ -19,7 +19,10 @@ data class WebDavUiState(
     val loading: Boolean = false,
     val error: String? = null,
     val sortMode: SortMode = SortMode.NAME,
-    val sortAsc: Boolean = true
+    val sortAsc: Boolean = true,
+    val selected: Set<String> = emptySet(),
+    val multiSelectMode: Boolean = false,
+    val message: String? = null
 ) {
     /** 排序后的文件列表：目录始终在前，然后按选定字段排序 */
     val sortedFiles: List<FileEntry>
@@ -67,13 +70,22 @@ class WebDavViewModel : ViewModel() {
     }
 
     fun selectAccount(account: WebDavAccount) {
-        _state.value = _state.value.copy(currentAccount = account, currentPath = "/")
+        _state.value = _state.value.copy(
+            currentAccount = account,
+            currentPath = "/",
+            selected = emptySet(),
+            multiSelectMode = false
+        )
         refresh()
     }
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
-            _state.value = _state.value.copy(currentPath = entry.path)
+            _state.value = _state.value.copy(
+                currentPath = entry.path,
+                selected = emptySet(),
+                multiSelectMode = false
+            )
             refresh()
         }
     }
@@ -82,15 +94,89 @@ class WebDavViewModel : ViewModel() {
         val path = _state.value.currentPath.trimEnd('/')
         if (path.isEmpty() || path == "/") return
         val parent = path.substringBeforeLast('/').ifEmpty { "/" }
-        _state.value = _state.value.copy(currentPath = parent)
+        _state.value = _state.value.copy(
+            currentPath = parent,
+            selected = emptySet(),
+            multiSelectMode = false
+        )
         refresh()
     }
 
     /** 面包屑跳转到指定路径 */
     fun navigateTo(path: String) {
         val normalized = path.trim().ifEmpty { "/" }
-        _state.value = _state.value.copy(currentPath = normalized)
+        _state.value = _state.value.copy(
+            currentPath = normalized,
+            selected = emptySet(),
+            multiSelectMode = false
+        )
         refresh()
+    }
+
+    fun toggleSelect(path: String) {
+        val cur = _state.value
+        val sel = if (path in cur.selected) cur.selected - path else cur.selected + path
+        _state.value = cur.copy(selected = sel, multiSelectMode = sel.isNotEmpty())
+    }
+
+    fun selectAll() {
+        val allPaths = _state.value.files.map { it.path }.toSet()
+        _state.value = _state.value.copy(
+            selected = allPaths,
+            multiSelectMode = allPaths.isNotEmpty()
+        )
+    }
+
+    fun clearSelection() {
+        _state.value = _state.value.copy(
+            selected = emptySet(),
+            multiSelectMode = false
+        )
+    }
+
+    fun copySelected() {
+        val acc = _state.value.currentAccount ?: return
+        val curFiles = _state.value.files.associateBy { it.path }
+        val items = _state.value.selected.mapNotNull { p ->
+            curFiles[p]?.let { entry ->
+                com.example.myfile.core.ClipboardEntry(entry = entry, account = acc)
+            }
+        }
+        com.example.myfile.core.TransferClipboard.copy(items)
+        _state.value = _state.value.copy(
+            selected = emptySet(),
+            multiSelectMode = false,
+            message = "已复制 ${items.size} 项，可在任意目录粘贴"
+        )
+    }
+
+    fun deleteSelected() {
+        val acc = _state.value.currentAccount ?: return
+        val paths = _state.value.selected.toList()
+        viewModelScope.launch {
+            for (p in paths) {
+                try { repo.delete(acc, p) } catch (_: Exception) {}
+            }
+            _state.value = _state.value.copy(selected = emptySet(), multiSelectMode = false)
+            refresh()
+        }
+    }
+
+    fun pasteHere(context: android.content.Context) {
+        val acc = _state.value.currentAccount ?: return
+        val items = com.example.myfile.core.TransferClipboard.items.value
+        if (items.isEmpty()) return
+        val targetPath = _state.value.currentPath
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true)
+            val count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items)
+            _state.value = _state.value.copy(loading = false, message = "已粘贴 $count 项")
+            refresh()
+        }
+    }
+
+    fun clearMessage() {
+        _state.value = _state.value.copy(message = null)
     }
 
     /** 切换排序字段；若点击同一字段则翻转方向，否则升序 */

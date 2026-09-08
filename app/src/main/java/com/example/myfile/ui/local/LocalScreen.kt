@@ -8,11 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,10 +35,20 @@ import java.io.File
 @Composable
 fun LocalScreen(vm: LocalViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+    val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showNewFolder by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var openWithRequest by remember { mutableStateOf<LocalOpenWithRequest?>(null) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(state.message) {
+        state.message?.let {
+            snackbarHostState.showSnackbar(it)
+            vm.clearMessage()
+        }
+    }
 
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
@@ -139,19 +145,47 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 Icon(Icons.Filled.Add, "新建文件夹")
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (state.multiSelectMode) {
                 BottomAppBar {
+                    TextButton(onClick = { vm.selectAll() }) {
+                        Text("全选")
+                    }
+                    Button(onClick = { vm.copySelected() }) {
+                        Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("复制 (${state.selected.size})")
+                    }
+                    Spacer(Modifier.weight(1f))
                     IconButton(onClick = { vm.deleteSelected() }) {
                         Icon(Icons.Filled.Delete, "删除")
                     }
+                    TextButton(onClick = { vm.clearSelection() }) {
+                        Text("取消")
+                    }
+                }
+            } else if (clipboardItems.isNotEmpty()) {
+                BottomAppBar {
+                    Text(
+                        "剪贴板: ${clipboardItems.size} 项",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 12.dp)
+                    )
                     Spacer(Modifier.weight(1f))
-                    Text("已选 ${state.selected.size} 项", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = { vm.pasteHere(context) }) {
+                        Icon(Icons.Filled.ContentPaste, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("粘贴到此处")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { com.example.myfile.core.TransferClipboard.clear() }) {
+                        Text("清空")
+                    }
                 }
             }
         }
     ) { padding ->
-        val context = androidx.compose.ui.platform.LocalContext.current
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

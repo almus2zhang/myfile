@@ -62,6 +62,7 @@ fun TransferScreen(vm: TransferViewModel = viewModel()) {
 
 @Composable
 private fun TaskCard(task: TransferTask, vm: TransferViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val progress = if (task.totalBytes > 0) task.downloadedBytes.toFloat() / task.totalBytes else 0f
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -82,26 +83,55 @@ private fun TaskCard(task: TransferTask, vm: TransferViewModel) {
                     style = MaterialTheme.typography.labelLarge
                 )
             }
+            if (task.localPath.isNotBlank()) {
+                Text(
+                    "保存位置: ${task.localPath}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             task.errorMessage?.let {
                 Text("错误: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 when (task.status) {
                     TransferStatus.DOWNLOADING, TransferStatus.QUEUED -> {
                         OutlinedButton(onClick = { vm.pause(task.id) }) {
                             Icon(Icons.Filled.Pause, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("暂停")
                         }
+                        OutlinedButton(onClick = { vm.cancel(task.id) }) { Text("取消") }
                     }
                     TransferStatus.PAUSED, TransferStatus.FAILED -> {
                         OutlinedButton(onClick = { vm.resume(task.id) }) {
                             Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("继续")
                         }
+                        OutlinedButton(onClick = { vm.cancel(task.id) }) { Text("取消") }
+                    }
+                    TransferStatus.COMPLETED -> {
+                        Button(onClick = {
+                            val f = java.io.File(task.localPath)
+                            if (f.exists()) {
+                                com.example.myfile.core.FileOpener.buildLocalViewIntent(context, f)?.let {
+                                    try {
+                                        context.startActivity(it)
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }) {
+                            Text("打开文件")
+                        }
                     }
                     else -> {}
                 }
-                OutlinedButton(onClick = { vm.cancel(task.id) }) { Text("取消") }
-                OutlinedButton(onClick = { vm.delete(task.id) }) {
-                    Icon(Icons.Filled.Delete, null, Modifier.size(16.dp))
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = { vm.delete(task.id) }) {
+                    Icon(Icons.Filled.Delete, "删除记录")
                 }
             }
         }

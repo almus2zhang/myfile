@@ -73,6 +73,44 @@ class LocalViewModel : ViewModel() {
         _state.value = cur.copy(selected = sel, multiSelectMode = sel.isNotEmpty())
     }
 
+    fun selectAll() {
+        val allPaths = _state.value.files.map { it.path }.toSet()
+        _state.value = _state.value.copy(
+            selected = allPaths,
+            multiSelectMode = allPaths.isNotEmpty()
+        )
+    }
+
+    fun copySelected() {
+        val curFiles = _state.value.files.associateBy { it.path }
+        val items = _state.value.selected.mapNotNull { p ->
+            curFiles[p]?.let { entry ->
+                com.example.myfile.core.ClipboardEntry(entry = entry, account = null)
+            }
+        }
+        com.example.myfile.core.TransferClipboard.copy(items)
+        _state.value = _state.value.copy(
+            selected = emptySet(),
+            multiSelectMode = false,
+            message = "已复制 ${items.size} 项，可在任意目录粘贴"
+        )
+    }
+
+    fun pasteHere(context: android.content.Context) {
+        val items = com.example.myfile.core.TransferClipboard.items.value
+        if (items.isEmpty()) return
+        val targetDir = _state.value.currentDir
+        viewModelScope.launch {
+            val count = com.example.myfile.core.TransferOps.pasteToLocal(context, targetDir, items)
+            _state.value = _state.value.copy(message = "已粘贴 $count 项")
+            refresh()
+        }
+    }
+
+    fun clearMessage() {
+        _state.value = _state.value.copy(message = null)
+    }
+
     fun newFolder(name: String) {
         viewModelScope.launch {
             val ok = repo.mkdir(_state.value.currentDir, name)

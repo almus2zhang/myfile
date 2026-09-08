@@ -43,6 +43,11 @@ class DownloadManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val runningTasks = mutableMapOf<Long, kotlinx.coroutines.Job>()
     private val mutex = Mutex()
+    private val renamePrefs = context.getSharedPreferences("download_pending_renames", Context.MODE_PRIVATE)
+
+    init {
+        recoverPendingRenames()
+    }
 
     /** UI 层订阅的任务流 */
     val tasks: StateFlow<List<TransferTask>> =
@@ -105,6 +110,7 @@ class DownloadManager(
         if (shouldRename) {
             val tmpPath = renameToVideo(remotePath)
             downloadPath = if (client.move(remotePath, tmpPath)) {
+                recordPendingRename(tmpPath, remotePath, account)
                 DownloadLog.log(TAG, "rename download: $remotePath -> $tmpPath")
                 tmpPath
             } else {
@@ -129,10 +135,11 @@ class DownloadManager(
             )
         )
         launchEngine(taskId, account, downloadPath, localFile, totalBytes) {
-            // 下载结束后（无论成败），把服务器端文件改回原名
+            // 下载结束后（无论成败），把服务器端文件改回原名，并清理持久化记录
             if (shouldRename && downloadPath != remotePath) {
                 try {
                     client.move(downloadPath, remotePath)
+                    removePendingRename(downloadPath)
                     DownloadLog.log(TAG, "rename back: $downloadPath -> $remotePath")
                 } catch (e: Exception) {
                     DownloadLog.log(TAG, "rename back failed: ${e.message}")
@@ -140,6 +147,55 @@ class DownloadManager(
             }
         }
         return@withContext taskId
+    }
+
+    private fun recordPendingRename(tmpPath: String, originalPath: String, account: com.example.myfile.model.WebDavAccount) {
+        try {
+            val json = org.json.JSONObject().apply {
+                put("originalPath", originalPath)
+                put("accountId", account.id)
+                put("url", account.url)
+                put("username", account.username)
+                put("password", account.password)
+            }.toString()
+            renamePrefs.edit().putString(tmpPath, json).apply()
+        } catch (_: Exception) {}
+    }
+
+    private fun removePendingRename(tmpPath: String) {
+        renamePrefs.edit().remove(tmpPath).apply()
+    }
+
+    /**
+     * 自动恢复机制：若之前改名下载过程中程序闪退、被系统强杀或断网中断，
+     * 在重新启动或初始化时自动将服务器端残留的 .avi 临时文件名改回原始文件名。
+     */
+    fun recoverPendingRenames() {
+        scope.launch {
+            val all = renamePrefs.all
+            if (all.isEmpty()) return@launch
+            DownloadLog.log(TAG, "recovering ${all.size} pending renames...")
+            for ((tmpPath, value) in all) {
+                val jsonStr = value as? String ?: continue
+                try {
+                    val obj = org.json.JSONObject(jsonStr)
+                    val originalPath = obj.getString("originalPath")
+                    val acc = com.example.myfile.model.WebDavAccount(
+                        id = obj.optLong("accountId", 0L),
+                        name = "Recover",
+                        url = obj.getString("url"),
+                        username = obj.getString("username"),
+                        password = obj.getString("password")
+                    )
+                    val client = clientProvider(acc)
+                    val ok = client.move(tmpPath, originalPath)
+                    DownloadLog.log(TAG, "recovered pending rename: $tmpPath -> $originalPath, result=$ok")
+                    removePendingRename(tmpPath)
+                } catch (e: Exception) {
+                    DownloadLog.log(TAG, "failed recovering pending rename $tmpPath: ${e.message}")
+                }
+            }
+        }
     }
 
     /** 生成一个 .avi 后缀的临时远程路径（同目录、唯一名，避免覆盖已有文件） */

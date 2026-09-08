@@ -134,7 +134,10 @@ fun FileListItem(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        if (trailing != null) {
+        if (isSelected) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(Icons.Filled.CheckCircle, "已选", tint = MaterialTheme.colorScheme.primary)
+        } else if (trailing != null) {
             Spacer(modifier = Modifier.width(8.dp))
             trailing()
         }
