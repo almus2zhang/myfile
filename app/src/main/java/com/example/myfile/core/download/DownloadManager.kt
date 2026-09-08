@@ -47,6 +47,13 @@ class DownloadManager(
 
     init {
         recoverPendingRenames()
+        scope.launch {
+            try {
+                taskDao.fixStuckCompletedTasks()
+            } catch (e: Exception) {
+                Log.e(TAG, "fixStuckCompletedTasks error", e)
+            }
+        }
     }
 
     /** UI 层订阅的任务流 */
@@ -240,20 +247,26 @@ class DownloadManager(
                     // 单连接完整 GET（不用 Range），模拟 CX 文件浏览器的行为
                     DownloadLog.log(TAG, "using single connection full GET mode")
                     fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
-                    taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                    taskDao.markCompleted(taskId)
                 } else {
                     val engine = ParallelDownloadEngine(clients, config, chunkDao)
                     val raf = RandomAccessFile(localFile, "rw").apply { setLength(totalBytes) }
+                    var lastProgressJob: kotlinx.coroutines.Job? = null
                     raf.use {
                         val result = engine.startDownload(remotePath, it, taskId, totalBytes) { downloaded, _ ->
-                            scope.launch { taskDao.updateProgress(taskId, downloaded, TransferStatus.DOWNLOADING.name) }
+                            lastProgressJob = scope.launch {
+                                taskDao.updateProgress(taskId, downloaded)
+                            }
                         }
+                        // 等待可能尚未完成的并发进度入库协程
+                        try { lastProgressJob?.join() } catch (_: Exception) {}
+
                         when (result) {
-                            DownloadResult.Success -> taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                            DownloadResult.Success -> taskDao.markCompleted(taskId)
                             DownloadResult.UnsupportedRange -> {
                                 // 回退单连接顺序下载
                                 fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
-                                taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                                taskDao.markCompleted(taskId)
                             }
                             DownloadResult.Canceled -> taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
                             is DownloadResult.Failed -> taskDao.updateStatus(taskId, TransferStatus.FAILED.name, result.message)
@@ -294,11 +307,11 @@ class DownloadManager(
                         output.write(buf, 0, n)
                         total += n
                         if (total - lastReport > 512 * 1024) {
-                            taskDao.updateProgress(taskId, total, TransferStatus.DOWNLOADING.name)
+                            taskDao.updateProgress(taskId, total)
                             lastReport = total
                         }
                     }
-                    taskDao.updateProgress(taskId, total, TransferStatus.COMPLETED.name)
+                    taskDao.markCompleted(taskId)
                 }
             }
         }
@@ -332,17 +345,25 @@ class DownloadManager(
         java.net.URI(c.baseUrlString()).port.toString()
     } catch (e: Exception) { "?" }
 
-    private fun DownloadTaskEntity.toUi(): TransferTask = TransferTask(
-        id = id,
-        fileName = fileName,
-        remoteUrl = remoteUrl,
-        localPath = localPath,
-        totalBytes = totalBytes,
-        downloadedBytes = downloadedBytes,
-        speedBytesPerSec = 0,
-        status = runCatching { TransferStatus.valueOf(status) }.getOrDefault(TransferStatus.QUEUED),
-        chunks = emptyList(),
-        isUpload = isUpload,
-        errorMessage = errorMessage
-    )
+    private fun DownloadTaskEntity.toUi(): TransferTask {
+        val parsedStatus = runCatching { TransferStatus.valueOf(status) }.getOrDefault(TransferStatus.QUEUED)
+        val finalStatus = if (parsedStatus == TransferStatus.DOWNLOADING && totalBytes > 0 && downloadedBytes >= totalBytes) {
+            TransferStatus.COMPLETED
+        } else {
+            parsedStatus
+        }
+        return TransferTask(
+            id = id,
+            fileName = fileName,
+            remoteUrl = remoteUrl,
+            localPath = localPath,
+            totalBytes = totalBytes,
+            downloadedBytes = downloadedBytes,
+            speedBytesPerSec = 0,
+            status = finalStatus,
+            chunks = emptyList(),
+            isUpload = isUpload,
+            errorMessage = errorMessage
+        )
+    }
 }
