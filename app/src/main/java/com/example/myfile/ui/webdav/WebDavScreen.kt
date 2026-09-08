@@ -674,7 +674,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     com.example.myfile.core.WebDavThumbRequest(acc, entry)
                                 } else if (category == "video" && acc != null) {
                                     if (com.example.myfile.MyApp.instance.currentSettings.value.loadRemoteVideoThumbnails) {
-                                        fullUrl
+                                        com.example.myfile.core.WebDavThumbRequest(acc, entry)
                                     } else {
                                         null
                                     }

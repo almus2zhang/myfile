@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.ExifInterface
+import android.media.MediaMetadataRetriever
 import android.util.Log
 import com.example.myfile.MyApp
 import com.example.myfile.model.FileEntry
@@ -403,5 +404,53 @@ object ThumbnailManager {
 
         // 超过 1.5MB 且无 EXIF 缩略图：不下载全量大图，返回 null（显示默认类型图标），杜绝偷跑流量
         null
+    }
+
+    /**
+     * 为 WebDAV 远程视频提取首帧缩略图：
+     * 利用系统的 MediaMetadataRetriever 发起基于 HTTP Range 的轻量分片按需探测，
+     * 仅拉取视频索引（moov/header）与首个关键帧，绝不全量下载几个 G 的视频整包！
+     * 提取成功后保存为规整的 144x144 JPEG 缩略图并落盘缓存。
+     */
+    suspend fun getOrFetchWebDavVideoThumb(
+        context: Context,
+        account: WebDavAccount,
+        entry: FileEntry
+    ): File? = withContext(Dispatchers.IO) {
+        val key = "webdav_video_${account.id}_${entry.path}_${entry.size}_${entry.lastModified}"
+        val cached = getCachedThumbnail(context, key)
+        if (cached != null) return@withContext cached
+
+        val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
+        val fullUrl = account.connectionUrl().trimEnd('/') + p
+        val auth = "Basic " + java.util.Base64.getEncoder()
+            .encodeToString("${account.username}:${account.password}".toByteArray())
+
+        val targetFile = getCacheFile(context, key)
+        val mmr = MediaMetadataRetriever()
+        try {
+            val headers = HashMap<String, String>()
+            headers["Authorization"] = auth
+            headers["User-Agent"] = "myfile/1.0 (Android; WebDAV)"
+            mmr.setDataSource(fullUrl, headers)
+            // 提取第一秒（1,000,000 微秒）的关键帧；若无则取第 0 帧
+            val frame = mmr.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: mmr.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: return@withContext null
+
+            val scaled = Bitmap.createScaledBitmap(frame, 144, 144, true)
+            targetFile.outputStream().use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            if (scaled != frame) scaled.recycle()
+            frame.recycle()
+            targetFile
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract remote video thumb for ${entry.name}: ${e.message}")
+            if (targetFile.exists()) targetFile.delete()
+            null
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
+        }
     }
 }

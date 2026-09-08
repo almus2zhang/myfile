@@ -24,14 +24,18 @@ class WebDavThumbFetcher(
 
     override suspend fun fetch(): FetchResult? {
         val ext = data.entry.name.substringAfterLast('.', "").lowercase()
-        val file = if (ext == "apk") {
-            ThumbnailManager.getOrFetchWebDavApkThumb(
+        val file = when {
+            ext == "apk" -> ThumbnailManager.getOrFetchWebDavApkThumb(
                 options.context,
                 data.account,
                 data.entry
             )
-        } else {
-            ThumbnailManager.getOrFetchWebDavImageThumb(
+            FileOpener.isVideo(data.entry.name) -> ThumbnailManager.getOrFetchWebDavVideoThumb(
+                options.context,
+                data.account,
+                data.entry
+            )
+            else -> ThumbnailManager.getOrFetchWebDavImageThumb(
                 options.context,
                 data.account,
                 data.entry
