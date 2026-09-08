@@ -433,6 +433,24 @@ object ThumbnailManager {
             headers["Authorization"] = auth
             headers["User-Agent"] = "myfile/1.0 (Android; WebDAV)"
             mmr.setDataSource(fullUrl, headers)
+
+            // 顺带读取视频时长并缓存至数据库（零额外网络消耗）
+            val dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (dur > 0L) {
+                try {
+                    val videoKey = "${account.id}_${entry.path}"
+                    val existing = MyApp.instance.db.videoProgressDao().get(videoKey)
+                    MyApp.instance.db.videoProgressDao().save(
+                        com.example.myfile.data.db.entity.VideoProgressEntity(
+                            uriKey = videoKey,
+                            positionMs = existing?.positionMs ?: 0L,
+                            durationMs = dur,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+
             // 提取第一秒（1,000,000 微秒）的关键帧；若无则取第 0 帧
             val frame = mmr.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: mmr.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)

@@ -59,4 +59,8 @@ class SettingsViewModel : ViewModel() {
     fun updateLoadRemoteVideoThumbnails(enabled: Boolean) {
         viewModelScope.launch { store.update { it.copy(loadRemoteVideoThumbnails = enabled) } }
     }
+
+    fun updateShowVideoDuration(enabled: Boolean) {
+        viewModelScope.launch { store.update { it.copy(showVideoDuration = enabled) } }
+    }
 }

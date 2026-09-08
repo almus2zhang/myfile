@@ -46,6 +46,8 @@ fun FileListItem(
     thumbnailAuth: String? = null,
     thumbnailKey: String? = null,
     videoProgress: Float? = null,
+    videoDurationMs: Long? = null,
+    videoPositionMs: Long? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -185,12 +187,23 @@ fun FileListItem(
             val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
             val dateStr = fmt.format(Date(entry.lastModified))
 
+            val timeInfo = if (visualType == VisualType.VIDEO && videoDurationMs != null && videoDurationMs > 0L) {
+                if (videoPositionMs != null && videoPositionMs > 1000L) {
+                    "${formatDuration(videoPositionMs)} / ${formatDuration(videoDurationMs)}"
+                } else {
+                    formatDuration(videoDurationMs)
+                }
+            } else null
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 val metaText = if (entry.isDirectory) {
                     "文件夹  ·  $dateStr"
+                } else if (timeInfo != null) {
+                    "${formatSize(entry.size)}  ·  $dateStr  ·  $timeInfo"
                 } else {
                     "${formatSize(entry.size)}  ·  $dateStr"
                 }
@@ -199,7 +212,8 @@ fun FileListItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
 
                 // 观看进度独立微胶囊 Badge
@@ -301,4 +315,17 @@ fun formatSize(bytes: Long): String {
 
 fun formatSizeStatic(bytes: Long): String = formatSize(bytes)
 fun formatSpeed(bytesPerSec: Long): String = formatSize(bytesPerSec) + "/s"
+
+fun formatDuration(ms: Long): String {
+    if (ms <= 0L) return "00:00"
+    val totalSec = ms / 1000
+    val sec = totalSec % 60
+    val min = (totalSec / 60) % 60
+    val hours = totalSec / 3600
+    return if (hours > 0) {
+        String.format(Locale.US, "%02d:%02d:%02d", hours, min, sec)
+    } else {
+        String.format(Locale.US, "%02d:%02d", min, sec)
+    }
+}
 

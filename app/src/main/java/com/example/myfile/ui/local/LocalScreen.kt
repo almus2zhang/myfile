@@ -15,6 +15,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -117,6 +119,39 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
 
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
+    val currentSettings by MyApp.instance.currentSettings.collectAsState()
+    val showVideoDuration = currentSettings.showVideoDuration
+
+    // 本地视频：异步轻量读取本地时长（纯本地文件秒级探测，0 网络流量消耗）
+    LaunchedEffect(state.files, showVideoDuration) {
+        if (!showVideoDuration) return@LaunchedEffect
+        val videoEntries = state.files.filter { !it.isDirectory && FileOpener.isVideo(it.name) }
+        if (videoEntries.isNotEmpty()) {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                for (v in videoEntries) {
+                    val saved = MyApp.instance.db.videoProgressDao().get(v.path)
+                    if (saved == null || saved.durationMs <= 0L) {
+                        try {
+                            val mmr = android.media.MediaMetadataRetriever()
+                            mmr.setDataSource(v.path)
+                            val dur = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            mmr.release()
+                            if (dur > 0L) {
+                                MyApp.instance.db.videoProgressDao().save(
+                                    VideoProgressEntity(
+                                        uriKey = v.path,
+                                        positionMs = saved?.positionMs ?: 0L,
+                                        durationMs = dur,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
 
     val imageEntries = remember(state.sortedFiles) {
         state.sortedFiles.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
@@ -459,12 +494,15 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     }
                 }
                 val category = FileOpener.fileCategory(entry.name)
+                val vProg = progressMap[entry.path]
                 FileListItem(
                     entry = entry,
                     thumbnailUrl = if (!entry.isDirectory) entry.path else null,
-                    videoProgress = progressMap[entry.path]?.let {
+                    videoProgress = vProg?.let {
                         if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
                     },
+                    videoDurationMs = if (showVideoDuration) vProg?.durationMs else null,
+                    videoPositionMs = if (showVideoDuration) vProg?.positionMs else null,
                     onClick = {
                         if (state.multiSelectMode) {
                             vm.toggleSelect(entry.path)

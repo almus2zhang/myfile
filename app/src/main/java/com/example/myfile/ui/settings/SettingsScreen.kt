@@ -110,6 +110,29 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 }
             }
 
+            // 视频文件时长与进度展示开关
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("显示视频时长与播放进度", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "在视频文件日期的后方展示总时长及播放进度点（例如：01:45:20 或 32:10 / 01:45:20）。本地视频与已播放视频直接本地秒级读取，0 额外网络消耗",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = s.showVideoDuration,
+                        onCheckedChange = { vm.updateShowVideoDuration(it) }
+                    )
+                }
+            }
+
             // 实时网络传输监视器入口
             Card(
                 modifier = Modifier.fillMaxWidth(),

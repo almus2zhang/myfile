@@ -121,6 +121,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
 
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
+    val currentSettings by MyApp.instance.currentSettings.collectAsState()
 
     val imageEntries = remember(state.sortedFiles) {
         state.sortedFiles.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
@@ -667,13 +668,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 )
                             }
                         }
+                        val vProg = progressMap[videoKey]
                         FileListItem(
                             entry = entry,
                             thumbnailUrl = if (!entry.isDirectory) {
                                 if ((category == "image" || category == "apk") && acc != null) {
                                     com.example.myfile.core.WebDavThumbRequest(acc, entry)
                                 } else if (category == "video" && acc != null) {
-                                    if (com.example.myfile.MyApp.instance.currentSettings.value.loadRemoteVideoThumbnails) {
+                                    if (currentSettings.loadRemoteVideoThumbnails) {
                                         com.example.myfile.core.WebDavThumbRequest(acc, entry)
                                     } else {
                                         null
@@ -684,9 +686,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             } else null,
                             thumbnailAuth = auth,
                             thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
-                            videoProgress = progressMap[videoKey]?.let {
+                            videoProgress = vProg?.let {
                                 if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
                             },
+                            videoDurationMs = if (currentSettings.showVideoDuration) vProg?.durationMs else null,
+                            videoPositionMs = if (currentSettings.showVideoDuration) vProg?.positionMs else null,
                             isSelected = entry.path in state.selected,
                             onClick = {
                                 if (state.multiSelectMode) {
