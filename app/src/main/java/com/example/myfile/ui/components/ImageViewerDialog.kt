@@ -10,8 +10,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,13 +19,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +71,12 @@ fun ImageViewerDialog(
         val safeInitial = initialIndex.coerceIn(0, images.size - 1)
         val pagerState = rememberPagerState(initialPage = safeInitial) { images.size }
         var showChrome by remember { mutableStateOf(true) }
+        var isCurrentPageZoomed by remember { mutableStateOf(false) }
+
+        // 翻页时自动重置缩放状态
+        LaunchedEffect(pagerState.currentPage) {
+            isCurrentPageZoomed = false
+        }
 
         Box(
             modifier = Modifier
@@ -78,6 +85,7 @@ fun ImageViewerDialog(
         ) {
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = !isCurrentPageZoomed,
                 modifier = Modifier.fillMaxSize(),
                 beyondBoundsPageCount = 1
             ) { page ->
@@ -93,7 +101,12 @@ fun ImageViewerDialog(
                     imageUrl = imgUrl,
                     authHeader = authHeader,
                     contentDescription = entry.name,
-                    onTap = { showChrome = !showChrome }
+                    onTap = { showChrome = !showChrome },
+                    onZoomStateChange = { zoomed ->
+                        if (page == pagerState.currentPage) {
+                            isCurrentPageZoomed = zoomed
+                        }
+                    }
                 )
             }
 
@@ -107,14 +120,14 @@ fun ImageViewerDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(Color.Black.copy(alpha = 0.6f))
                         .statusBarsPadding()
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) {
                         Icon(
-                            imageVector = Icons.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
                             tint = Color.White
                         )
@@ -142,40 +155,48 @@ fun ImageViewerDialog(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ZoomableImage(
     imageUrl: String,
     authHeader: String?,
     contentDescription: String,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    onZoomStateChange: (Boolean) -> Unit
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 4f)
-        if (scale == 1f) {
+        val newScale = (scale * zoomChange).coerceIn(1f, 4.5f)
+        if (newScale <= 1.02f) {
+            scale = 1f
             offset = Offset.Zero
+            onZoomStateChange(false)
         } else {
-            val maxOffset = 500f * (scale - 1f)
+            scale = newScale
+            val maxOffset = 600f * (newScale - 1f)
             offset = Offset(
                 x = (offset.x + panChange.x).coerceIn(-maxOffset, maxOffset),
                 y = (offset.y + panChange.y).coerceIn(-maxOffset, maxOffset)
             )
+            onZoomStateChange(true)
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
-                        if (scale > 1f) {
+                        if (scale > 1.05f) {
                             scale = 1f
                             offset = Offset.Zero
+                            onZoomStateChange(false)
                         } else {
                             scale = 2.5f
+                            onZoomStateChange(true)
                         }
                     },
                     onTap = { onTap() }
@@ -183,6 +204,7 @@ private fun ZoomableImage(
             }
             .transformable(
                 state = transformState,
+                canPan = { scale > 1.05f },
                 enabled = true
             ),
         contentAlignment = Alignment.Center

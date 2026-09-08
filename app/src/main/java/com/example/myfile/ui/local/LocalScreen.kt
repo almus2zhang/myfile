@@ -24,10 +24,14 @@ import com.example.myfile.MyApp
 import com.example.myfile.core.AppCandidate
 import com.example.myfile.core.FileOpener
 import com.example.myfile.model.FileEntry
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.ComponentName
+import android.content.Intent
+import com.example.myfile.data.db.entity.VideoProgressEntity
 import com.example.myfile.ui.components.FileListItem
 import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
-import com.example.myfile.ui.components.VideoPlayerDialog
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -47,7 +51,45 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
         state.files.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
     }
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
-    var playingVideoEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var currentWatchingVideoKey by remember { mutableStateOf<String?>(null) }
+
+    val externalLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        val key = currentWatchingVideoKey
+        if (key != null && data != null) {
+            val pos = when {
+                data.hasExtra("position") -> {
+                    val p = data.getIntExtra("position", -1)
+                    if (p >= 0) p.toLong() else data.getLongExtra("position", -1L)
+                }
+                data.hasExtra("extra_position") -> {
+                    data.getLongExtra("extra_position", -1L)
+                }
+                else -> -1L
+            }
+            val dur = when {
+                data.hasExtra("duration") -> {
+                    val d = data.getIntExtra("duration", -1)
+                    if (d >= 0) d.toLong() else data.getLongExtra("duration", -1L)
+                }
+                else -> -1L
+            }
+            if (pos > 0L) {
+                scope.launch {
+                    MyApp.instance.db.videoProgressDao().save(
+                        VideoProgressEntity(
+                            uriKey = key,
+                            positionMs = pos,
+                            durationMs = dur.coerceAtLeast(0L),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     val isRoot = vm.isAtRoot(state.currentDir)
 
@@ -121,11 +163,33 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     val intent = FileOpener.buildLocalViewIntent(context, file) ?: return
                     val category = FileOpener.fileCategory(entry.name)
                     scope.launch {
-                        if (!forceChooser &&
-                            FileOpener.openWithDefault(context.applicationContext, category, intent)
-                        ) {
-                            return@launch
+                        if (category == "video") {
+                            val saved = MyApp.instance.db.videoProgressDao().get(entry.path)
+                            if (saved != null && saved.positionMs > 1000L) {
+                                intent.putExtra("position", saved.positionMs.toInt())
+                                intent.putExtra("position_ms", saved.positionMs)
+                                intent.putExtra("extra_position", saved.positionMs)
+                                intent.putExtra("from_start", false)
+                            }
+                            intent.putExtra("return_result", true)
                         }
+
+                        val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                        if (!forceChooser && defaultApp != null) {
+                            val parts = defaultApp.split('/')
+                            if (parts.size == 2) {
+                                val explicit = Intent(intent).apply {
+                                    component = ComponentName(parts[0], parts[1])
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                currentWatchingVideoKey = if (category == "video") entry.path else null
+                                try {
+                                    externalLauncher.launch(explicit)
+                                    return@launch
+                                } catch (_: Exception) {}
+                            }
+                        }
+
                         val candidates = FileOpener.resolveCandidates(context.applicationContext, intent)
                         openWithRequest = LocalOpenWithRequest(
                             entry = entry,
@@ -151,8 +215,6 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                             val idx = imageEntries.indexOfFirst { it.path == entry.path }
                             if (idx >= 0) viewingImageIndex = idx
                             else openEntry(forceChooser = false)
-                        } else if (category == "video") {
-                            playingVideoEntry = entry
                         } else {
                             openEntry(forceChooser = false)
                         }
@@ -219,16 +281,29 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     if (always) {
                         FileOpener.setDefault(req.category, candidate)
                     }
-                    FileOpener.openWith(
-                        context = com.example.myfile.MyApp.instance,
-                        intent = req.intent,
-                        candidate = candidate
-                    )
+                    val explicit = Intent(req.intent).apply {
+                        component = candidate.component
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
+                    try {
+                        externalLauncher.launch(explicit)
+                    } catch (e: Exception) {
+                        FileOpener.openWith(context, req.intent, candidate)
+                    }
                 }
                 openWithRequest = null
             },
             onSystemChooser = {
-                FileOpener.openWithSystemChooser(context, req.intent)
+                val chooser = Intent.createChooser(req.intent, "打开为").apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
+                try {
+                    externalLauncher.launch(chooser)
+                } catch (e: Exception) {
+                    FileOpener.openWithSystemChooser(context, req.intent)
+                }
                 openWithRequest = null
             }
         )
@@ -240,16 +315,6 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             images = imageEntries,
             initialIndex = idx,
             onDismiss = { viewingImageIndex = null }
-        )
-    }
-
-    // 内置视频播放器（带播放进度记忆与断点续播）
-    playingVideoEntry?.let { entry ->
-        VideoPlayerDialog(
-            videoUri = Uri.fromFile(File(entry.path)),
-            videoTitle = entry.name,
-            progressKey = entry.path,
-            onDismiss = { playingVideoEntry = null }
         )
     }
 }
