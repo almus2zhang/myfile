@@ -16,7 +16,8 @@ data class LocalUiState(
     val files: List<FileEntry> = emptyList(),
     val selected: Set<String> = emptySet(),
     val multiSelectMode: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    val isRefreshing: Boolean = false
 )
 
 class LocalViewModel : ViewModel() {
@@ -35,7 +36,11 @@ class LocalViewModel : ViewModel() {
 
     fun refresh() {
         val dir = _state.value.currentDir
-        _state.value = _state.value.copy(files = repo.list(dir), currentDir = dir)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _state.value = _state.value.copy(isRefreshing = true)
+            val list = repo.list(dir)
+            _state.value = _state.value.copy(files = list, currentDir = dir, isRefreshing = false)
+        }
     }
 
     fun open(entry: FileEntry) {

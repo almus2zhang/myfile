@@ -14,10 +14,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +56,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         state.message?.let {
             snackbarHostState.showSnackbar(it)
             vm.clearMessage()
+        }
+    }
+
+    val pullRefreshState = rememberPullToRefreshState()
+    if (pullRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            vm.refresh()
+        }
+    }
+    LaunchedEffect(state.loading) {
+        if (state.loading) {
+            pullRefreshState.startRefresh()
+        } else {
+            pullRefreshState.endRefresh()
         }
     }
 
@@ -290,19 +308,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 }
             }
 
-            if (state.loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.error != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(state.error!!, color = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { vm.refresh() }) { Text("重试") }
-                    }
-                }
-            } else if (state.currentAccount == null) {
+            if (state.currentAccount == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.CloudOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -310,16 +316,42 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         Text("点击上方「+ 添加」配置 WebDAV 账户", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+            } else if (state.loading && state.files.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (state.error != null && state.files.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(state.error!!, color = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { vm.refresh() }) { Text("重试") }
+                    }
+                }
             } else {
-                val context = androidx.compose.ui.platform.LocalContext.current
                 val acc = state.currentAccount
                 val auth = acc?.let {
                     "Basic " + java.util.Base64.getEncoder()
                         .encodeToString("${it.username}:${it.password}".toByteArray())
                 }
                 val base = acc?.url?.trimEnd('/') ?: ""
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(pullRefreshState.nestedScrollConnection)
+                ) {
+                    if (state.sortedFiles.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("此文件夹为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
                         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                         val fullUrl = base + p
                         val category = FileOpener.fileCategory(entry.name)
@@ -472,6 +504,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     }
                 }
             }
+
+            PullToRefreshContainer(
+                state = pullRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
+    }
         }
     }
 

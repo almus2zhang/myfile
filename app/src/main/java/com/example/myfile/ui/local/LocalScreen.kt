@@ -10,6 +10,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +50,20 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
         state.message?.let {
             snackbarHostState.showSnackbar(it)
             vm.clearMessage()
+        }
+    }
+
+    val pullRefreshState = rememberPullToRefreshState()
+    if (pullRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            vm.refresh()
+        }
+    }
+    LaunchedEffect(state.isRefreshing) {
+        if (state.isRefreshing) {
+            pullRefreshState.startRefresh()
+        } else {
+            pullRefreshState.endRefresh()
         }
     }
 
@@ -186,12 +203,16 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             }
         }
     ) { padding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .nestedScroll(pullRefreshState.nestedScrollConnection)
         ) {
-            items(state.files, key = { it.path }) { entry: FileEntry ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(state.files, key = { it.path }) { entry: FileEntry ->
                 fun openEntry(forceChooser: Boolean) {
                     val file = java.io.File(entry.path)
                     val intent = FileOpener.buildLocalViewIntent(context, file) ?: return
@@ -306,7 +327,12 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 HorizontalDivider()
             }
         }
+        PullToRefreshContainer(
+            state = pullRefreshState,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
+}
 
     if (showNewFolder) {
         AlertDialog(
