@@ -32,7 +32,7 @@ class WebDavClient(
         effectiveBaseUrl?.let { return it }
         synchronized(this) {
             if (effectiveBaseUrl == null) {
-                effectiveBaseUrl = resolveEndpoint(baseUrl, client)
+                effectiveBaseUrl = resolveEndpoint(baseUrl)
             }
             return effectiveBaseUrl!!
         }
@@ -433,75 +433,242 @@ class WebDavClient(
     companion object {
         private const val TAG = "WebDavClient"
 
-        /**
-         * 解析 WebDAV 端点：
-         * 1. 自动跟随 HTTP 301/302/303/307/308 重定向到最终地址
-         * 2. 若访问地址直接输出包含 ip:port 的文本，则提取该 ip:port 并自动补充 http:// 前缀
-         */
-        fun resolveEndpoint(rawUrl: String, client: OkHttpClient): String {
-            var target = rawUrl.trim()
-            if (target.isBlank()) return target
-            if (!target.startsWith("http://", ignoreCase = true) && !target.startsWith("https://", ignoreCase = true)) {
-                target = "http://$target"
+        fun is302Url(url: String?): Boolean {
+            if (url.isNullOrBlank()) return false
+            val trimmed = url.trim()
+            return trimmed.startsWith("302:", ignoreCase = true) ||
+                trimmed.startsWith("302：") ||
+                trimmed.startsWith("301:", ignoreCase = true) ||
+                trimmed.startsWith("301：")
+        }
+
+        fun extract302TargetUrl(url: String): String {
+            val trimmed = url.trim()
+            return when {
+                trimmed.startsWith("302:", ignoreCase = true) -> trimmed.substring(4).trim()
+                trimmed.startsWith("302：") -> trimmed.substring(4).trim()
+                trimmed.startsWith("301:", ignoreCase = true) -> trimmed.substring(4).trim()
+                trimmed.startsWith("301：") -> trimmed.substring(4).trim()
+                else -> trimmed
+            }
+        }
+
+        private data class HttpResponseSnapshot(
+            val statusCode: Int,
+            val location: String?,
+            val body: String
+        )
+
+        private fun executeHttpSocketRequest(urlString: String): HttpResponseSnapshot {
+            val uri = java.net.URI(urlString)
+            val scheme = uri.scheme?.lowercase(java.util.Locale.US) ?: "http"
+            val host = uri.host ?: throw java.net.MalformedURLException("Invalid host: $urlString")
+            var port = uri.port
+            if (port == -1) {
+                port = if (scheme == "https") 443 else 80
+            }
+            var path = uri.rawPath
+            if (path.isNullOrEmpty()) path = "/"
+            if (uri.rawQuery != null) path += "?" + uri.rawQuery
+
+            val socket: java.net.Socket
+            if (scheme == "https") {
+                val trustAll = arrayOf<javax.net.ssl.TrustManager>(object : javax.net.ssl.X509TrustManager {
+                    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+                    override fun checkClientTrusted(certs: Array<java.security.cert.X509Certificate>, authType: String) {}
+                    override fun checkServerTrusted(certs: Array<java.security.cert.X509Certificate>, authType: String) {}
+                })
+                val sc = javax.net.ssl.SSLContext.getInstance("TLS")
+                sc.init(null, trustAll, java.security.SecureRandom())
+
+                // 针对非标准服务端（如 Lucky/NAS等打洞），解析真实IP并移除 SNI serverNames 避免握手阻断/断连
+                val ip = java.net.InetAddress.getByName(host)
+                val ipOnly = java.net.InetAddress.getByAddress(ip.address)
+
+                val raw = java.net.Socket()
+                raw.connect(java.net.InetSocketAddress(ipOnly, port), 8000)
+                raw.soTimeout = 8000
+
+                val ssl = sc.socketFactory.createSocket(raw, null, port, true) as javax.net.ssl.SSLSocket
+                try {
+                    val p = ssl.sslParameters
+                    p.serverNames = null
+                    ssl.sslParameters = p
+                } catch (_: Exception) {}
+                ssl.startHandshake()
+                socket = ssl
+            } else {
+                socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress(host, port), 8000)
+                socket.soTimeout = 8000
             }
 
-            var hops = 0
-            while (hops < 10) {
-                hops++
-                try {
-                    val req = Request.Builder()
-                        .url(target)
-                        .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 15; V2309A Build/AP3A.240905.015.A1)")
-                        .header("Accept", "*/*")
-                        .get()
-                        .build()
+            socket.use { s ->
+                val out = s.getOutputStream()
+                val hostHeader = if (port == 80 || port == 443) host else "$host:$port"
+                val req = "GET $path HTTP/1.1\r\n" +
+                    "Host: $hostHeader\r\n" +
+                    "User-Agent: Dalvik/2.1.0 (Linux; U; Android 15; V2309A Build/AP3A.240905.015.A1)\r\n" +
+                    "Accept: */*\r\n" +
+                    "Connection: close\r\n\r\n"
+                out.write(req.toByteArray(Charsets.UTF_8))
+                out.flush()
 
-                    val resp = client.newCall(req).execute()
-                    val code = resp.code
-                    val location = resp.header("Location")
-                    val body = try { resp.body?.string()?.trim() ?: "" } catch (e: Exception) { "" }
-                    resp.close()
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(s.getInputStream(), Charsets.UTF_8))
+                val statusLine = reader.readLine() ?: throw java.io.IOException("服务器无响应")
+                var statusCode = 200
+                val parts = statusLine.split(" ")
+                if (parts.size >= 2) {
+                    statusCode = parts[1].toIntOrNull() ?: 200
+                }
 
-                    // 1. 处理 HTTP 重定向 (301, 302, 303, 307, 308)
-                    if (code in 301..303 || code == 307 || code == 308) {
-                        if (!location.isNullOrBlank()) {
-                            val nextUrl = if (location.startsWith("http://", true) || location.startsWith("https://", true)) {
-                                location
-                            } else {
-                                target.toHttpUrlOrNull()?.resolve(location)?.toString() ?: location
-                            }
-                            Log.i(TAG, "resolveEndpoint 跟踪重定向: $target -> $nextUrl ($code)")
-                            if (nextUrl != target) {
-                                target = nextUrl
-                                continue
-                            }
-                        }
+                var location: String? = null
+                while (true) {
+                    val headerLine = reader.readLine() ?: break
+                    if (headerLine.isEmpty()) break
+                    if (headerLine.startsWith("Location:", ignoreCase = true)) {
+                        location = headerLine.substring(9).trim()
                     }
+                }
 
-                    // 2. 处理直接输出包含 ip:port 的文本
-                    if (code in 200..299 && body.length < 500 && !body.contains("<html", ignoreCase = true) && !body.contains("<?xml", ignoreCase = true)) {
-                        val ipPortRegex = """(?:https?://)?([a-zA-Z0-9.-]+:\d{1,5}(?:/\S*)?)""".toRegex()
-                        val match = ipPortRegex.find(body)
-                        if (match != null) {
-                            var extracted = match.value.trim()
-                            if (!extracted.startsWith("http://", ignoreCase = true) && !extracted.startsWith("https://", ignoreCase = true)) {
-                                extracted = "http://$extracted"
-                            }
-                            Log.i(TAG, "resolveEndpoint 提取到纯文本 IP:端口: $extracted (原地址: $target)")
-                            if (extracted != target) {
-                                target = extracted
-                                continue
-                            }
-                        }
-                    }
+                val body = java.lang.StringBuilder()
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    body.append(line).append("\n")
+                    if (body.length > 65536) break
+                }
 
-                    break
-                } catch (e: Exception) {
-                    Log.w(TAG, "resolveEndpoint 请求异常 $target: ${e.message}")
-                    break
+                return HttpResponseSnapshot(
+                    statusCode = statusCode,
+                    location = location,
+                    body = body.toString()
+                )
+            }
+        }
+
+        private fun resolveRedirectUrl(baseUrl: String, location: String): String {
+            val loc = location.trim()
+            if (loc.startsWith("http://", ignoreCase = true) || loc.startsWith("https://", ignoreCase = true)) {
+                return loc
+            }
+            val uri = try {
+                java.net.URI(baseUrl)
+            } catch (_: Exception) {
+                null
+            }
+            val normalizedBase = if (uri == null || uri.rawPath.isNullOrEmpty()) {
+                if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+            } else {
+                baseUrl
+            }
+            return try {
+                java.net.URI(normalizedBase).resolve(loc).toString()
+            } catch (_: Exception) {
+                val scheme = uri?.scheme ?: "http"
+                val authority = uri?.rawAuthority ?: uri?.host ?: ""
+                if (loc.startsWith("/")) {
+                    "$scheme://$authority$loc"
+                } else {
+                    val baseWithSlash = if (normalizedBase.endsWith("/")) normalizedBase else "$normalizedBase/"
+                    baseWithSlash + loc
                 }
             }
-            return target
+        }
+
+        /**
+         * 参照 Jellycine 实现的重定向追踪与纯文本端点提取：
+         * 1. 采用 Socket 直连（信任所有证书并剥离 SNI，彻底解决 Lucky / nasnas.site 的 connection closed 问题）
+         * 2. 跟踪 HTTP 301/302/303/307/308 重定向链
+         * 3. 提取响应内容中的有效 URL 或 ip:port
+         */
+        fun fetch302WithRedirects(startUrl: String, maxHops: Int = 8): String {
+            var currentUrl = startUrl.trim()
+            if (!currentUrl.startsWith("http://", ignoreCase = true) && !currentUrl.startsWith("https://", ignoreCase = true)) {
+                currentUrl = "http://$currentUrl"
+            }
+            val visited = mutableSetOf<String>()
+
+            for (hop in 0 until maxHops) {
+                visited.add(currentUrl.trimEnd('/'))
+                val response = try {
+                    executeHttpSocketRequest(currentUrl)
+                } catch (e: Exception) {
+                    Log.w(TAG, "executeHttpSocketRequest 失败 ($currentUrl): ${e.message}")
+                    if (currentUrl.startsWith("https://", ignoreCase = true) && hop == 0) {
+                        val httpUrl = "http://" + currentUrl.removePrefix("https://")
+                        try {
+                            executeHttpSocketRequest(httpUrl)
+                        } catch (_: Exception) {
+                            return currentUrl
+                        }
+                    } else {
+                        return currentUrl
+                    }
+                }
+
+                val statusCode = response.statusCode
+                val location = response.location
+
+                if ((statusCode in 301..303 || statusCode == 307 || statusCode == 308) && !location.isNullOrBlank()) {
+                    val nextUrl = resolveRedirectUrl(currentUrl, location)
+                    if (nextUrl.contains("0.0.0.0") || visited.contains(nextUrl.trimEnd('/'))) {
+                        break
+                    }
+                    Log.i(TAG, "fetch302WithRedirects 重定向: $currentUrl -> $nextUrl ($statusCode)")
+                    currentUrl = nextUrl
+                    continue
+                }
+
+                // 检查非重定向返回内容（例如 200 OK 中的 IP:端口 或 URL）
+                val bodyStr = response.body.trim()
+                for (line in bodyStr.lines()) {
+                    val candidate = line.trim()
+                    if (candidate.isNotBlank() &&
+                        (candidate.startsWith("http://", ignoreCase = true) ||
+                         candidate.startsWith("https://", ignoreCase = true) ||
+                         (candidate.contains(":") && !candidate.contains("<") && !candidate.contains("{") && !candidate.contains(" ")))
+                    ) {
+                        val fullAddress = if (!candidate.startsWith("http://", ignoreCase = true) && !candidate.startsWith("https://", ignoreCase = true)) {
+                            "http://$candidate"
+                        } else {
+                            candidate
+                        }
+                        Log.i(TAG, "fetch302WithRedirects 提取到端点: $fullAddress (来源: $currentUrl)")
+                        return fullAddress
+                    }
+                }
+
+                if (hop > 0) {
+                    return currentUrl
+                }
+
+                if (bodyStr.isNotBlank() && !bodyStr.contains("<html", ignoreCase = true) && !bodyStr.contains("<?xml", ignoreCase = true)) {
+                    val ipPortRegex = """(?:https?://)?([a-zA-Z0-9.-]+:\d{1,5}(?:/\S*)?)""".toRegex()
+                    val match = ipPortRegex.find(bodyStr)
+                    if (match != null) {
+                        var extracted = match.value.trim()
+                        if (!extracted.startsWith("http://", ignoreCase = true) && !extracted.startsWith("https://", ignoreCase = true)) {
+                            extracted = "http://$extracted"
+                        }
+                        Log.i(TAG, "fetch302WithRedirects 正则提取到: $extracted")
+                        return extracted
+                    }
+                }
+
+                return currentUrl
+            }
+            return currentUrl
+        }
+
+        fun resolveEndpoint(rawUrl: String): String {
+            val target = extract302TargetUrl(rawUrl).trim()
+            if (target.isBlank()) return target
+            return try {
+                fetch302WithRedirects(target)
+            } catch (e: Exception) {
+                Log.w(TAG, "resolveEndpoint 异常: ${e.message}")
+                target
+            }
         }
     }
 }

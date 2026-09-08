@@ -85,8 +85,11 @@ fun WebDavAccountDialog(
                         onClick = {
                             val cleanUrl = cleanWebDavUrl(url)
                             url = cleanUrl
+                            val targetForValidation = if (cleanUrl.startsWith("302:", ignoreCase = true) || cleanUrl.startsWith("301:", ignoreCase = true)) {
+                                cleanUrl.substring(4)
+                            } else cleanUrl
                             val errorMsg = try {
-                                cleanUrl.toHttpUrl()
+                                targetForValidation.toHttpUrl()
                                 null
                             } catch (e: Exception) {
                                 e.message ?: "格式无法解析"
@@ -156,6 +159,12 @@ fun cleanWebDavUrl(raw: String): String {
     s = sb.toString()
     // 3. 移除所有空白字符（包括空格、制表符、换行符）
     s = s.replace(Regex("""\s+"""), "")
+    // 3.1 识别并提取 302: / 301: 前缀
+    val is302 = s.startsWith("302:", ignoreCase = true) || s.startsWith("301:", ignoreCase = true)
+    val prefix = if (is302) s.substring(0, 4) else ""
+    if (is302) {
+        s = s.substring(4)
+    }
     // 4. 清理末尾意外跟随的 http(s) 片段，如 "httphttp:" 或 "http://"
     s = s.replace(Regex("""(https?)+:?/*$""", RegexOption.IGNORE_CASE), "")
     s = s.replace(Regex("""(?<=\d|/)(https?://*)+$""", RegexOption.IGNORE_CASE), "")
@@ -171,7 +180,7 @@ fun cleanWebDavUrl(raw: String): String {
     if (!s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) {
         s = "http://$s"
     }
-    return s.trim()
+    return (prefix + s).trim()
 }
 
 /** 从 URL 提取端口号（用于回显） */

@@ -80,7 +80,18 @@ class MyApp : Application(), ImageLoaderFactory {
         super.onCreate()
         instance = this
 
+        val trustAll = arrayOf<javax.net.ssl.TrustManager>(object : javax.net.ssl.X509TrustManager {
+            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+            override fun checkClientTrusted(certs: Array<java.security.cert.X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(certs: Array<java.security.cert.X509Certificate>, authType: String) {}
+        })
+        val sslContext = javax.net.ssl.SSLContext.getInstance("TLS").apply {
+            init(null, trustAll, java.security.SecureRandom())
+        }
+
         okHttpClient = OkHttpClient.Builder()
+            .sslSocketFactory(sslContext.socketFactory, trustAll[0] as javax.net.ssl.X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
             // 短连接池：空闲 3 秒即关闭，避免长连接被运营商持续限速。
             // 每次下载尽量用新连接（新连接可能"抽到"未限速的路径），
             // 匹配其他客户端"随机时快时慢"的行为。
