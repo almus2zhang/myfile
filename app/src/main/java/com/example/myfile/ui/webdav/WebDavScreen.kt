@@ -135,6 +135,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     val externalLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        scope.launch {
+            MyApp.instance.downloadManager.finishAllStreamingRenames()
+        }
         val data = result.data
         val key = currentWatchingVideoKey
         if (key != null && data != null) {
@@ -166,6 +169,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         )
                     )
                 }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            MyApp.instance.appScope.launch {
+                MyApp.instance.downloadManager.finishAllStreamingRenames()
             }
         }
     }
@@ -502,14 +513,24 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             if (acc == null) return
                             scope.launch {
                                 val appCtx = context.applicationContext
-                                var intent = if (FileOpener.isVideo(entry.name)) {
-                                    val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
+                                val isVid = FileOpener.isVideo(entry.name)
+                                val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
+                                val ext = entry.name.substringAfterLast('.', "").lowercase()
+
+                                val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
+                                    MyApp.instance.downloadManager.startStreamingRename(acc, entry.path) ?: entry.path
+                                } else {
+                                    entry.path
+                                }
+
+                                var intent = if (isVid) {
                                     FileOpener.buildVideoStreamIntent(
                                         client = com.example.myfile.MyApp.instance.okHttpClient,
                                         account = acc,
-                                        remotePath = entry.path,
+                                        remotePath = streamRemotePath,
                                         fileName = entry.name,
-                                        fakeAvi = fakeAvi
+                                        fakeAvi = fakeAvi,
+                                        originalPath = entry.path
                                     )
                                 } else {
                                     val tmp = FileOpener.downloadToCache(
@@ -520,12 +541,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     ) ?: return@launch
                                     FileOpener.buildLocalViewIntent(appCtx, tmp)
                                 }
-                                if (intent == null) return@launch
+                                if (intent == null) {
+                                    if (isVid && fakeAvi && streamRemotePath != entry.path) {
+                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                    }
+                                    return@launch
+                                }
 
                                 // 视频流式意图若找不到可处理的播放器（http scheme 匹配太严），
                                 // 回退为下载到缓存后用 content:// 打开
                                 var candidates = FileOpener.resolveCandidates(appCtx, intent)
-                                if (candidates.isEmpty() && FileOpener.isVideo(entry.name)) {
+                                if (candidates.isEmpty() && isVid) {
+                                    if (fakeAvi && streamRemotePath != entry.path) {
+                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                    }
                                     val tmp = FileOpener.downloadToCache(
                                         client = com.example.myfile.MyApp.instance.okHttpClient,
                                         authHeader = auth ?: "",
@@ -569,7 +598,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         try {
                                             externalLauncher.launch(explicit)
                                             return@launch
-                                        } catch (_: Exception) {}
+                                        } catch (_: Exception) {
+                                            if (isVid && fakeAvi && streamRemotePath != entry.path) {
+                                                MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                            }
+                                        }
                                     }
                                 }
 
@@ -735,7 +768,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         OpenWithDialog(
             title = "打开 \"${req.entry.name}\"",
             candidates = req.candidates,
-            onDismiss = { openWithRequest = null },
+            onDismiss = {
+                scope.launch { MyApp.instance.downloadManager.finishStreamingRename(req.entry.path) }
+                openWithRequest = null
+            },
             onSelect = { candidate, always ->
                 scope.launch {
                     if (always) {
@@ -750,6 +786,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     try {
                         externalLauncher.launch(explicit)
                     } catch (e: Exception) {
+                        MyApp.instance.downloadManager.finishStreamingRename(req.entry.path)
                         FileOpener.openWith(context, req.intent, candidate)
                     }
                 }
@@ -767,6 +804,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 try {
                     externalLauncher.launch(chooser)
                 } catch (e: Exception) {
+                    scope.launch { MyApp.instance.downloadManager.finishStreamingRename(req.entry.path) }
                     FileOpener.openWithSystemChooser(context, req.intent)
                 }
                 openWithRequest = null

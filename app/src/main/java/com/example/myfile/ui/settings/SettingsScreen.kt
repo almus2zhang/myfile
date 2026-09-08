@@ -46,9 +46,9 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("改名下载（伪装视频）", style = MaterialTheme.typography.titleMedium)
+                        Text("改名下载（伪装视频加速）", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "下载非视频文件前临时改成 .avi 后缀（服务器端改名），绕过运营商按 Content-Type 的限速，下载完成后自动改回原名",
+                            "下载文件前临时在服务器端将后缀改成 .avi（支持视频与各类文件），绕过运营商限速，下载完成后自动改回原名",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -69,9 +69,9 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("视频播放伪装 .avi 后缀", style = MaterialTheme.typography.titleMedium)
+                        Text("视频播放伪装 .avi 后缀加速", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "播放视频时将本地流代理链接与打开方式伪装为 .avi 扩展名，具体视频格式交由播放器根据流数据自行解析",
+                            "在线播放视频时临时将服务器端文件改名为 .avi，加速流媒体加载与播放，退出播放时自动恢复原名，格式交由播放器解析",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

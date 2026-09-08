@@ -45,6 +45,7 @@ object StreamProxy {
         var account: WebDavAccount,
         val remotePath: String,
         val rawKey: String,
+        val originalPath: String = remotePath,
         val fakeAvi: Boolean = false
     ) {
         val username get() = account.username
@@ -151,7 +152,12 @@ object StreamProxy {
 
                     // 透传关键头
                     listOf("Content-Length", "Content-Range", "Content-Type", "Accept-Ranges").forEach { h ->
-                        val v = if (h == "Content-Type" && entry.fakeAvi) "video/x-msvideo" else respHeaders[h]
+                        val v = if (h == "Content-Type" && entry.fakeAvi) {
+                            val origMime = FileOpener.guessMime(entry.originalPath)
+                            if (origMime != "*/*") origMime else "video/*"
+                        } else {
+                            respHeaders[h]
+                        }
                         if (v != null) output.write("$h: $v\r\n".toByteArray())
                     }
                     output.write("Connection: close\r\n".toByteArray())
@@ -246,11 +252,13 @@ object StreamProxy {
         account: WebDavAccount,
         remotePath: String,
         displayName: String? = null,
-        fakeAvi: Boolean = false
+        fakeAvi: Boolean = false,
+        originalPath: String = remotePath
     ): String {
         val p = ensureStarted()
         val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
-        val rawKey = "acc_${account.id}$path"
+        val origPath = if (originalPath.startsWith("/")) originalPath else "/$originalPath"
+        val rawKey = "acc_${account.id}$origPath"
         val md5 = MessageDigest.getInstance("MD5")
             .digest(rawKey.toByteArray())
             .joinToString("") { "%02x".format(it) }
@@ -260,6 +268,7 @@ object StreamProxy {
             account = account,
             remotePath = path,
             rawKey = rawKey,
+            originalPath = origPath,
             fakeAvi = fakeAvi
         )
 

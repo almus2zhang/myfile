@@ -52,7 +52,7 @@ class MyApp : Application(), ImageLoaderFactory {
             .build()
     }
 
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     lateinit var okHttpClient: OkHttpClient
         private set

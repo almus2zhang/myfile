@@ -46,7 +46,8 @@ object FileOpener {
         account: com.example.myfile.model.WebDavAccount,
         remotePath: String,
         fileName: String,
-        fakeAvi: Boolean = false
+        fakeAvi: Boolean = false,
+        originalPath: String = remotePath
     ): Intent? {
         return try {
             val displayName = if (fakeAvi) {
@@ -55,7 +56,14 @@ object FileOpener {
             } else {
                 fileName
             }
-            val localUrl = StreamProxy.register(client, account, remotePath, displayName, fakeAvi)
+            val localUrl = StreamProxy.register(
+                client = client,
+                account = account,
+                remotePath = remotePath,
+                displayName = displayName,
+                fakeAvi = fakeAvi,
+                originalPath = originalPath
+            )
             val mime = if (fakeAvi) "video/*" else guessMime(fileName)
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(Uri.parse(localUrl), mime)
@@ -149,12 +157,13 @@ object FileOpener {
         }
     }
 
-    private fun guessMime(name: String): String {
+    fun guessMime(name: String): String {
         val ext = name.substringAfterLast('.', "").lowercase()
         if (ext.isEmpty()) return "*/*"
         return when (ext) {
             "apk" -> "application/vnd.android.package-archive"
             "txt", "log" -> "text/plain"
+            "mp4" -> "video/mp4"
             "mkv" -> "video/x-matroska"
             "webm" -> "video/webm"
             "ts", "m2ts" -> "video/mp2t"

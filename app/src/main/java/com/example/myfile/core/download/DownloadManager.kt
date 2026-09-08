@@ -105,13 +105,12 @@ class DownloadManager(
 
         val localFile = File(localDir, fileName)
 
-        // 改名下载（伪装视频）：把非视频文件临时改成 .avi 后缀（服务器端 MOVE），
-        // 绕过运营商按 Content-Type 的限速，下载完成后改回原名。
+        // 改名下载（伪装视频）：把非 .avi 文件临时改成 .avi 后缀（服务器端 MOVE），
+        // 绕过运营商按 Content-Type / 扩展名的限速，下载完成后改回原名。
         // 仅影响远程路径，本地文件名保持原名不变。
         val settings = settingsProvider()
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        val shouldRename = settings.renameToVideoExt &&
-            ext.isNotEmpty() && ext !in videoExtensions
+        val shouldRename = settings.renameToVideoExt && ext != "avi"
         // 实际下载用的远程路径（可能被改名为 .avi）
         val downloadPath: String
         if (shouldRename) {
@@ -205,14 +204,76 @@ class DownloadManager(
         }
     }
 
+    data class StreamingRename(
+        val account: com.example.myfile.model.WebDavAccount,
+        val tmpPath: String,
+        val originalPath: String
+    )
+
+    private val activeStreamingRenames = java.util.concurrent.ConcurrentHashMap<String, StreamingRename>()
+
+    /** 针对在线流式播放：临时把远程文件改名为 .avi，加速流媒体传输 */
+    suspend fun startStreamingRename(
+        account: com.example.myfile.model.WebDavAccount,
+        remotePath: String
+    ): String? = withContext(Dispatchers.IO) {
+        val ext = remotePath.substringAfterLast('.', "").lowercase()
+        if (ext == "avi") return@withContext remotePath
+        val client = clientProvider(account)
+        val tmpPath = renameToVideo(remotePath)
+        if (client.move(remotePath, tmpPath)) {
+            recordPendingRename(tmpPath, remotePath, account)
+            activeStreamingRenames[remotePath] = StreamingRename(account, tmpPath, remotePath)
+            DownloadLog.log(TAG, "streaming rename: $remotePath -> $tmpPath")
+            tmpPath
+        } else {
+            DownloadLog.log(TAG, "streaming rename MOVE failed: $remotePath")
+            null
+        }
+    }
+
+    suspend fun finishStreamingRename(remotePath: String) = withContext(Dispatchers.IO) {
+        val rename = activeStreamingRenames.remove(remotePath) ?: return@withContext
+        restoreRemoteFile(rename.account, rename.tmpPath, rename.originalPath)
+    }
+
+    suspend fun finishAllStreamingRenames() = withContext(Dispatchers.IO) {
+        val all = activeStreamingRenames.values.toList()
+        activeStreamingRenames.clear()
+        for (rename in all) {
+            restoreRemoteFile(rename.account, rename.tmpPath, rename.originalPath)
+        }
+    }
+
+    suspend fun restoreRemoteFile(
+        account: com.example.myfile.model.WebDavAccount,
+        tmpPath: String,
+        originalPath: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (tmpPath == originalPath) return@withContext true
+        val client = clientProvider(account)
+        try {
+            val ok = client.move(tmpPath, originalPath)
+            if (ok) {
+                removePendingRename(tmpPath)
+                DownloadLog.log(TAG, "restore remote file: $tmpPath -> $originalPath")
+            }
+            ok
+        } catch (e: Exception) {
+            DownloadLog.log(TAG, "restore remote file failed: ${e.message}")
+            false
+        }
+    }
+
     /** 生成一个 .avi 后缀的临时远程路径（同目录、唯一名，避免覆盖已有文件） */
-    private fun renameToVideo(remotePath: String): String {
-        val dir = remotePath.substringBeforeLast('/', "")
-        val name = remotePath.substringAfterLast('/')
+    fun renameToVideo(remotePath: String): String {
+        val p = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
+        val dir = p.substringBeforeLast('/', "")
+        val name = p.substringAfterLast('/')
         // 去掉原扩展名后加 .avi，并加时间戳避免重名
         val base = name.substringBeforeLast('.', name)
         val ts = System.currentTimeMillis() % 100000
-        return if (dir.isEmpty()) "$base.mf$ts.avi" else "$dir/$base.mf$ts.avi"
+        return if (dir.isEmpty() || dir == "/") "/$base.mf$ts.avi" else "$dir/$base.mf$ts.avi"
     }
 
     private fun launchEngine(
@@ -323,10 +384,38 @@ class DownloadManager(
         taskDao.updateStatus(taskId, TransferStatus.PAUSED.name, null)
     }
 
-    suspend fun resume(taskId: Long, account: com.example.myfile.model.WebDavAccount) {
-        val task = taskDao.getById(taskId) ?: return
-        if (task.status == TransferStatus.COMPLETED.name) return
-        launchEngine(taskId, account, task.remoteUrl, File(task.localPath), task.totalBytes)
+    suspend fun resume(taskId: Long, account: com.example.myfile.model.WebDavAccount) = withContext(Dispatchers.IO) {
+        val task = taskDao.getById(taskId) ?: return@withContext
+        if (task.status == TransferStatus.COMPLETED.name) return@withContext
+        val settings = settingsProvider()
+        val ext = task.fileName.substringAfterLast('.', "").lowercase()
+        val shouldRename = settings.renameToVideoExt && ext != "avi"
+        val client = clientProvider(account)
+        val downloadPath: String
+        if (shouldRename) {
+            val tmpPath = renameToVideo(task.remoteUrl)
+            downloadPath = if (client.move(task.remoteUrl, tmpPath)) {
+                recordPendingRename(tmpPath, task.remoteUrl, account)
+                DownloadLog.log(TAG, "resume rename download: ${task.remoteUrl} -> $tmpPath")
+                tmpPath
+            } else {
+                DownloadLog.log(TAG, "resume rename download MOVE failed, fallback: ${task.remoteUrl}")
+                task.remoteUrl
+            }
+        } else {
+            downloadPath = task.remoteUrl
+        }
+        launchEngine(taskId, account, downloadPath, File(task.localPath), task.totalBytes) {
+            if (shouldRename && downloadPath != task.remoteUrl) {
+                try {
+                    client.move(downloadPath, task.remoteUrl)
+                    removePendingRename(downloadPath)
+                    DownloadLog.log(TAG, "resume rename back: $downloadPath -> ${task.remoteUrl}")
+                } catch (e: Exception) {
+                    DownloadLog.log(TAG, "resume rename back failed: ${e.message}")
+                }
+            }
+        }
     }
 
     suspend fun cancel(taskId: Long) {
