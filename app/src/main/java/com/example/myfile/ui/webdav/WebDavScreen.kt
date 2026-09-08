@@ -388,7 +388,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                         val fullUrl = base + p
                         val category = FileOpener.fileCategory(entry.name)
-                        val videoKey = acc?.let { "acc_${it.id}_$p" } ?: entry.path
+                        val videoKey = acc?.let { "acc_${it.id}$p" } ?: entry.path
 
                         // 打开文件：先尝试 myfile 记录的默认程序，无则弹「打开方式」对话框
                         fun openEntry(forceChooser: Boolean) {
@@ -484,6 +484,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 }
                             } else null,
                             thumbnailAuth = auth,
+                            thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
                             videoProgress = progressMap[videoKey]?.let {
                                 if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
                             },

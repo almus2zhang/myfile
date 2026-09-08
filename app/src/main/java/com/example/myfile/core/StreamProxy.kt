@@ -42,12 +42,14 @@ object StreamProxy {
 
     private data class Entry(
         val client: OkHttpClient,
-        val baseUrl: String,
-        val username: String,
-        val password: String,
+        var account: WebDavAccount,
         val remotePath: String,
         val rawKey: String
-    )
+    ) {
+        val username get() = account.username
+        val password get() = account.password
+        fun currentBaseUrl(): String = account.connectionUrl()
+    }
 
     /** 启动本地服务器，优先使用固定端口 58241，被占用则由系统分配 */
     @Synchronized
@@ -114,9 +116,30 @@ object StreamProxy {
                 if (entry == null) { writeError(output, 404, "stream expired"); return }
 
                 val rangeHeader = headers["range"]
-                val upstream = buildRequest(entry, entry.remotePath, rangeHeader)
+                var upstream = buildRequest(entry, entry.remotePath, rangeHeader)
 
-                entry.client.newCall(upstream).execute().use { resp ->
+                val callExecution = {
+                    try {
+                        entry.client.newCall(upstream).execute()
+                    } catch (e: Exception) {
+                        if (entry.account.isDynamic) {
+                            try {
+                                val freshUrl = kotlinx.coroutines.runBlocking {
+                                    MyApp.instance.webDavRepository.reResolveAndSave(entry.account)
+                                }
+                                entry.account = entry.account.copy(resolvedUrl = freshUrl)
+                                upstream = buildRequest(entry, entry.remotePath, rangeHeader)
+                                entry.client.newCall(upstream).execute()
+                            } catch (_: Exception) {
+                                throw e
+                            }
+                        } else {
+                            throw e
+                        }
+                    }
+                }
+
+                callExecution().use { resp ->
                     val status = resp.code
                     val respHeaders = resp.headers
                     val respBody = resp.body
@@ -180,7 +203,7 @@ object StreamProxy {
 
     private fun buildRequest(entry: Entry, remotePath: String, rangeHeader: String?): Request {
         val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
-        val fullUrl = entry.baseUrl.trimEnd('/') + path
+        val fullUrl = entry.currentBaseUrl().trimEnd('/') + path
         val auth = "Basic " + Base64.getEncoder()
             .encodeToString("${entry.username}:${entry.password}".toByteArray())
         return Request.Builder()
@@ -224,16 +247,14 @@ object StreamProxy {
     ): String {
         val p = ensureStarted()
         val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
-        val rawKey = "${account.url.trimEnd('/')}$path"
+        val rawKey = "acc_${account.id}$path"
         val md5 = MessageDigest.getInstance("MD5")
             .digest(rawKey.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
         entries[md5] = Entry(
             client = client,
-            baseUrl = account.connectionUrl(),
-            username = account.username,
-            password = account.password,
+            account = account,
             remotePath = path,
             rawKey = rawKey
         )

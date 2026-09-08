@@ -35,6 +35,7 @@ fun FileListItem(
     isSelected: Boolean = false,
     thumbnailUrl: Any? = null,
     thumbnailAuth: String? = null,
+    thumbnailKey: String? = null,
     videoProgress: Float? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
@@ -57,11 +58,12 @@ fun FileListItem(
                     .size(48.dp)
                     .clip(RoundedCornerShape(6.dp))
             ) {
+                val cKey = thumbnailKey ?: "thumb_${entry.path}"
                 AsyncImage(
                     model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                         .data(thumbnailUrl)
-                        .memoryCacheKey("thumb_${entry.path}")
-                        .diskCacheKey("thumb_${entry.path}")
+                        .memoryCacheKey(cKey)
+                        .diskCacheKey(cKey)
                         .apply {
                             if (thumbnailAuth != null) {
                                 addHeader("Authorization", thumbnailAuth)
