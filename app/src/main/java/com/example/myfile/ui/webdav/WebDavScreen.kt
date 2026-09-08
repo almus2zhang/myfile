@@ -352,7 +352,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         }
                         FileListItem(
                             entry = entry,
-                            thumbnailUrl = if (!entry.isDirectory) fullUrl else null,
+                            thumbnailUrl = if (!entry.isDirectory) {
+                                if (category == "image" && acc != null) {
+                                    com.example.myfile.core.WebDavThumbRequest(acc, entry)
+                                } else {
+                                    fullUrl
+                                }
+                            } else null,
                             thumbnailAuth = auth,
                             videoProgress = progressMap[videoKey]?.let {
                                 if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null

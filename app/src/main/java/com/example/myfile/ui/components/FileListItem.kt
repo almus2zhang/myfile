@@ -33,7 +33,7 @@ fun FileListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
-    thumbnailUrl: String? = null,
+    thumbnailUrl: Any? = null,
     thumbnailAuth: String? = null,
     videoProgress: Float? = null,
     trailing: @Composable (() -> Unit)? = null
@@ -72,6 +72,8 @@ fun FileListItem(
                         .build(),
                     contentDescription = entry.name,
                     contentScale = ContentScale.Crop,
+                    error = androidx.compose.ui.graphics.vector.rememberVectorPainter(iconFor(entry.isDirectory, category)),
+                    fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(iconFor(entry.isDirectory, category)),
                     modifier = Modifier.fillMaxSize()
                 )
                 if (category == "video" && videoProgress != null && videoProgress > 0f) {
