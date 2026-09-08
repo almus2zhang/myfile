@@ -222,23 +222,45 @@ class WebDavViewModel : ViewModel() {
                 currentAccount = saved, currentPath = "/", accounts = list, loading = false
             )
             // 然后异步测试连接
-            val (ok, msg) = repo.testConnection(saved)
-            if (!ok) {
-                _state.value = _state.value.copy(error = "保存成功，但连接失败: $msg")
+            val testRes = repo.testConnection(saved)
+            if (!testRes.ok) {
+                _state.value = _state.value.copy(error = "保存成功，但连接失败: ${testRes.message}")
             } else {
-                // 若探测到更准确的路径（msg 含 "探测到正确路径"），自动修正 URL
-                val detected = Regex("""探测到正确路径:\s*(\S+)""").find(msg)
-                if (detected != null) {
-                    val correctUrl = detected.groupValues[1]
+                // 若探测到更准确端点：如果是动态类别，更新 resolvedUrl（保留原始 url）；普通类别才修正 url
+                val detected = Regex("""探测到正确路径:\s*(\S+)""").find(testRes.message)
+                val newEndpoint = if (detected != null) {
+                    detected.groupValues[1]
+                } else if (testRes.resolvedUrl.isNotBlank()) {
+                    testRes.resolvedUrl
+                } else null
+
+                if (newEndpoint != null) {
                     val idx = list.indexOfFirst { it.id == saved.id }
                     if (idx >= 0) {
-                        list[idx] = saved.copy(url = correctUrl)
+                        if (saved.isDynamic) {
+                            list[idx] = saved.copy(resolvedUrl = newEndpoint)
+                        } else if (newEndpoint != saved.url) {
+                            list[idx] = saved.copy(url = newEndpoint)
+                        }
                         accountStore.save(list)
                         saved = list[idx]
                         _state.value = _state.value.copy(currentAccount = saved, accounts = list)
                     }
                 }
                 refresh()
+            }
+        }
+    }
+
+    fun reResolveAccount(account: WebDavAccount) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true, error = null)
+            val fresh = repo.reResolveAndSave(account)
+            if (fresh.isNotBlank()) {
+                _state.value = _state.value.copy(message = "已重新获取端点: $fresh")
+                refresh()
+            } else {
+                _state.value = _state.value.copy(loading = false, error = "重新获取端点失败，请检查原始网址")
             }
         }
     }

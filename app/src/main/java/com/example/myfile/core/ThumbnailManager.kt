@@ -1,4 +1,4 @@
-﻿package com.example.myfile.core
+package com.example.myfile.core
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -43,12 +43,12 @@ object ThumbnailManager {
         account: WebDavAccount,
         entry: FileEntry
     ): File? = withContext(Dispatchers.IO) {
-        val key = "${account.url}|${entry.path}"
+        val key = "acc_${account.id}|${entry.path}"
         val cached = getCachedThumbnail(context, key)
         if (cached != null) return@withContext cached
 
         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
-        val fullUrl = account.url.trimEnd('/') + p
+        val fullUrl = account.connectionUrl().trimEnd('/') + p
         val auth = "Basic " + java.util.Base64.getEncoder()
             .encodeToString("${account.username}:${account.password}".toByteArray())
 

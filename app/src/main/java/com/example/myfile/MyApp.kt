@@ -121,15 +121,18 @@ class MyApp : Application(), ImageLoaderFactory {
             settingsStore.settings.collect { _currentSettings.value = it }
         }
 
-        webDavRepository = WebDavRepository { account ->
-            WebDavClient(okHttpClient, account.url, account.username, account.password)
-        }
+        webDavRepository = WebDavRepository(
+            clientFactory = { account ->
+                WebDavClient(okHttpClient, account.connectionUrl(), account.username, account.password)
+            },
+            accountStore = accountStore
+        )
 
         downloadManager = DownloadManager(
             context = this,
             db = db,
             clientProvider = { account ->
-                WebDavClient(okHttpClient, account.url, account.username, account.password)
+                WebDavClient(okHttpClient, account.connectionUrl(), account.username, account.password)
             },
             settingsProvider = { _currentSettings.value }
         )

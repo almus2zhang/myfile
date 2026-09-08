@@ -1,4 +1,4 @@
-﻿package com.example.myfile.core
+package com.example.myfile.core
 
 import android.media.MediaMetadataRetriever
 import android.util.Log
@@ -231,7 +231,7 @@ object StreamProxy {
 
         entries[md5] = Entry(
             client = client,
-            baseUrl = account.url,
+            baseUrl = account.connectionUrl(),
             username = account.username,
             password = account.password,
             remotePath = path,

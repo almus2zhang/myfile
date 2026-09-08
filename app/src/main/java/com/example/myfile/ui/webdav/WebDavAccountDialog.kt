@@ -9,6 +9,11 @@ import com.example.myfile.model.WebDavAccount
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -23,6 +28,8 @@ fun WebDavAccountDialog(
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var user by remember { mutableStateOf(initial?.username ?: "") }
     var pass by remember { mutableStateOf(initial?.password ?: "") }
+    var isDynamic by remember { mutableStateOf(initial?.isDynamic ?: false) }
+    var resolvedUrl by remember { mutableStateOf(initial?.resolvedUrl ?: "") }
     var extraPorts by remember { mutableStateOf(initial?.extraUrls?.joinToString(",") { extractPort(it) } ?: "") }
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
@@ -31,7 +38,12 @@ fun WebDavAccountDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "添加账户" else "编辑账户") },
         text = {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.replace("\r", "").replace("\n", "") },
@@ -39,6 +51,51 @@ fun WebDavAccountDialog(
                     singleLine = true,
                     maxLines = 1
                 )
+
+                // 类别选择：普通固定地址 vs 动态解析/重定向
+                Text("账户类别", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = !isDynamic,
+                        onClick = { isDynamic = false },
+                        label = { Text("普通固定地址") },
+                        leadingIcon = if (!isDynamic) {
+                            { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = isDynamic,
+                        onClick = { isDynamic = true },
+                        label = { Text("动态解析/重定向") },
+                        leadingIcon = if (isDynamic) {
+                            { Icon(Icons.Filled.SyncAlt, null, Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+
+                if (isDynamic) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "💡 动态类别始终保存上方原始地址。日常使用解析后的端点连接；当 IP 或端口变动导致断开时，自动重新获取最新真实地址，无需手动修改配置。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            if (resolvedUrl.isNotBlank()) {
+                                Text(
+                                    "当前已解析连接端点: $resolvedUrl",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = url,
                     onValueChange = {
@@ -46,12 +103,16 @@ fun WebDavAccountDialog(
                         url = it.replace("\r", "").replace("\n", "").replace("\t", "")
                         testResult = null
                     },
-                    label = { Text("地址") },
-                    placeholder = { Text("http://192.168.1.100:5005/video") },
+                    label = { Text(if (isDynamic) "动态网址 / 重定向入口" else "WebDAV 地址") },
+                    placeholder = {
+                        Text(if (isDynamic) "https://web22.114.nasnas.site:11466" else "http://192.168.1.100:5005/video")
+                    },
                     singleLine = true,
                     maxLines = 1,
                     supportingText = {
-                        Text("群晖需带共享文件夹名，例如 http://域名:5005/video", style = MaterialTheme.typography.bodySmall)
+                        if (!isDynamic) {
+                            Text("群晖需带共享文件夹名，例如 http://域名:5005/video", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 )
                 OutlinedTextField(
@@ -100,13 +161,35 @@ fun WebDavAccountDialog(
                             }
                             testing = true
                             testResult = null
-                            val probe = WebDavAccount(initial?.id ?: 0, name.trim().ifBlank { "probe" }, cleanUrl, user.trim(), pass)
+                            val probe = WebDavAccount(
+                                id = initial?.id ?: 0,
+                                name = name.trim().ifBlank { "probe" },
+                                url = cleanUrl,
+                                username = user.trim(),
+                                password = pass,
+                                isDynamic = isDynamic,
+                                resolvedUrl = resolvedUrl
+                            )
                             kotlinx.coroutines.GlobalScope.launch {
-                                val (ok, msg, resolvedUrl) = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
-                                testResult = if (ok) "✓ 连接成功：$msg" else "✗ $msg"
-                                if (ok && resolvedUrl.isNotBlank() && resolvedUrl.trimEnd('/') != cleanUrl.trimEnd('/')) {
-                                    url = resolvedUrl
+                                val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
+                                val detectedEndpoint = res.resolvedUrl
+                                if (res.ok) {
+                                    if (detectedEndpoint.isNotBlank()) {
+                                        resolvedUrl = detectedEndpoint
+                                    }
+                                    val isRedirected = detectedEndpoint.isNotBlank() && detectedEndpoint.trimEnd('/') != cleanUrl.trimEnd('/')
+                                    if (!isDynamic && isRedirected) {
+                                        isDynamic = true
+                                        testResult = "✓ 连接成功！探测到重定向/动态端点，已自动设为「动态解析」类别 (端点: $detectedEndpoint)"
+                                    } else if (isDynamic) {
+                                        testResult = "✓ 连接成功！(已解析连接端点: $detectedEndpoint)"
+                                    } else {
+                                        testResult = "✓ 连接成功: ${res.message}"
+                                    }
+                                } else {
+                                    testResult = "✗ ${res.message}"
                                 }
+                                // 始终保留原始输入 cleanUrl，绝不将其覆盖为解析后的临时 IP
                                 testing = false
                             }
                         }
@@ -128,8 +211,20 @@ fun WebDavAccountDialog(
                 enabled = name.isNotBlank() && url.isNotBlank(),
                 onClick = {
                     val cleanUrl = cleanWebDavUrl(url)
-                    val extras = buildExtraUrls(cleanUrl, extraPorts)
-                    onSave(WebDavAccount(initial?.id ?: 0, name.trim(), cleanUrl, user.trim(), pass, extras))
+                    val baseForExtras = if (isDynamic && resolvedUrl.isNotBlank()) resolvedUrl else cleanUrl
+                    val extras = buildExtraUrls(baseForExtras, extraPorts)
+                    onSave(
+                        WebDavAccount(
+                            id = initial?.id ?: 0,
+                            name = name.trim(),
+                            url = cleanUrl,
+                            username = user.trim(),
+                            password = pass,
+                            extraUrls = extras,
+                            isDynamic = isDynamic,
+                            resolvedUrl = resolvedUrl
+                        )
+                    )
                 }
             ) { Text("保存") }
         },

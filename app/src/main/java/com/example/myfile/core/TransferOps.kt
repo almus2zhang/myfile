@@ -119,7 +119,7 @@ object TransferOps {
                     try {
                         val auth = "Basic " + java.util.Base64.getEncoder()
                             .encodeToString("${item.account.username}:${item.account.password}".toByteArray())
-                        val fullUrl = item.account.url.trimEnd('/') + (if (item.entry.path.startsWith("/")) item.entry.path else "/${item.entry.path}")
+                        val fullUrl = item.account.connectionUrl().trimEnd('/') + (if (item.entry.path.startsWith("/")) item.entry.path else "/${item.entry.path}")
                         val downloaded = FileOpener.downloadToCache(MyApp.instance.okHttpClient, auth, fullUrl, tmp.name)
                         if (downloaded != null && downloaded.exists()) {
                             val ok = repo.uploadFile(targetAccount, destPath, downloaded)

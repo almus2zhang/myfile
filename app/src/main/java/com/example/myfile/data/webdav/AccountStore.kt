@@ -33,7 +33,9 @@ class AccountStore(private val context: Context) {
                         password = o.getString("password"),
                         extraUrls = o.optJSONArray("extraUrls")?.let { ea ->
                             (0 until ea.length()).map { j -> ea.getString(j) }
-                        } ?: emptyList()
+                        } ?: emptyList(),
+                        isDynamic = o.optBoolean("isDynamic", false),
+                        resolvedUrl = o.optString("resolvedUrl", "")
                     )
                 }
             } catch (e: Exception) { emptyList() }
@@ -53,9 +55,32 @@ class AccountStore(private val context: Context) {
                     if (a.extraUrls.isNotEmpty()) {
                         put("extraUrls", JSONArray().apply { a.extraUrls.forEach { put(it) } })
                     }
+                    put("isDynamic", a.isDynamic)
+                    put("resolvedUrl", a.resolvedUrl)
                 })
             }
             p[key] = arr.toString()
+        }
+    }
+
+    /**
+     * 单独更新某动态账户的当前生效连接地址，保持原始 url 配置不被篡改
+     */
+    suspend fun updateResolvedUrl(accountId: Long, resolvedUrl: String) {
+        context.accountStore.edit { p ->
+            val json = p[key] ?: return@edit
+            try {
+                val arr = JSONArray(json)
+                val newArr = JSONArray()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    if (o.optLong("id") == accountId) {
+                        o.put("resolvedUrl", resolvedUrl)
+                    }
+                    newArr.put(o)
+                }
+                p[key] = newArr.toString()
+            } catch (_: Exception) {}
         }
     }
 }

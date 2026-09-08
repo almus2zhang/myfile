@@ -146,13 +146,23 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 title = {
                     Column {
                         Text(displayPath, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            state.currentAccount?.name ?: "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        val acc = state.currentAccount
+                        val subtitle = if (acc != null) {
+                            if (acc.isDynamic && acc.resolvedUrl.isNotBlank()) {
+                                "${acc.name} [动态: ${acc.connectionUrl()}]"
+                            } else {
+                                acc.name
+                            }
+                        } else ""
+                        if (subtitle.isNotEmpty()) {
+                            Text(
+                                subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -239,18 +249,41 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             else MaterialTheme.colorScheme.surfaceVariant,
                             border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
                         ) {
-                            Text(
-                                acc.name,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (acc.isDynamic) {
+                                    Icon(
+                                        Icons.Filled.SyncAlt,
+                                        contentDescription = "动态解析",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    acc.name,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = showAccMenu,
                             onDismissRequest = { showAccMenu = false }
                         ) {
+                            if (acc.isDynamic) {
+                                DropdownMenuItem(
+                                    text = { Text("重新获取真实地址") },
+                                    leadingIcon = { Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)) },
+                                    onClick = {
+                                        showAccMenu = false
+                                        vm.reResolveAccount(acc)
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("编辑") },
                                 onClick = {
@@ -334,7 +367,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     "Basic " + java.util.Base64.getEncoder()
                         .encodeToString("${it.username}:${it.password}".toByteArray())
                 }
-                val base = acc?.url?.trimEnd('/') ?: ""
+                val base = acc?.connectionUrl()?.trimEnd('/') ?: ""
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -355,7 +388,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                         val fullUrl = base + p
                         val category = FileOpener.fileCategory(entry.name)
-                        val videoKey = acc?.let { "${it.url.trimEnd('/')}$p" } ?: entry.path
+                        val videoKey = acc?.let { "acc_${it.id}_$p" } ?: entry.path
 
                         // 打开文件：先尝试 myfile 记录的默认程序，无则弹「打开方式」对话框
                         fun openEntry(forceChooser: Boolean) {
@@ -617,7 +650,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             "Basic " + java.util.Base64.getEncoder()
                 .encodeToString("${it.username}:${it.password}".toByteArray())
         }
-        val base = acc?.url?.trimEnd('/') ?: ""
+        val base = acc?.connectionUrl()?.trimEnd('/') ?: ""
         ImageViewerDialog(
             images = imageEntries,
             initialIndex = idx,
