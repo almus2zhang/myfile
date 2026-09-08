@@ -1,5 +1,6 @@
 package com.example.myfile.ui.webdav
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -19,12 +20,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.myfile.MyApp
 import com.example.myfile.core.AppCandidate
 import com.example.myfile.core.FileOpener
+import com.example.myfile.core.StreamProxy
 import com.example.myfile.model.FileEntry
-import kotlinx.coroutines.launch
 import com.example.myfile.ui.components.FileListItem
+import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
+import com.example.myfile.ui.components.VideoPlayerDialog
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
@@ -36,6 +41,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     var showMkdir by remember { mutableStateOf(false) }
     var mkdirName by remember { mutableStateOf("") }
     var showSortMenu by remember { mutableStateOf(false) }
+
+    val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
+    val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
+
+    val imageEntries = remember(state.sortedFiles) {
+        state.sortedFiles.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
+    }
+    var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
+    var playingVideoEntry by remember { mutableStateOf<Pair<Uri, FileEntry>?>(null) }
 
     // 「打开方式」选择对话框状态
     var openWithRequest by remember { mutableStateOf<OpenWithRequest?>(null) }
@@ -268,13 +282,28 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 )
                             }
                         }
+                        val category = FileOpener.fileCategory(entry.name)
+                        val videoKey = acc?.let { "${it.url}|${entry.path}" } ?: entry.path
                         FileListItem(
                             entry = entry,
                             thumbnailUrl = if (!entry.isDirectory) fullUrl else null,
                             thumbnailAuth = auth,
+                            videoProgress = progressMap[videoKey]?.let {
+                                if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
+                            },
                             onClick = {
-                                if (entry.isDirectory) vm.open(entry)
-                                else openEntry(forceChooser = false)
+                                if (entry.isDirectory) {
+                                    vm.open(entry)
+                                } else if (category == "image") {
+                                    val idx = imageEntries.indexOfFirst { it.path == entry.path }
+                                    if (idx >= 0) viewingImageIndex = idx
+                                    else openEntry(forceChooser = false)
+                                } else if (category == "video" && acc != null) {
+                                    val streamUrl = StreamProxy.register(MyApp.instance.okHttpClient, acc, entry.path)
+                                    playingVideoEntry = Pair(Uri.parse(streamUrl), entry)
+                                } else {
+                                    openEntry(forceChooser = false)
+                                }
                             },
                             trailing = {
                                 if (!entry.isDirectory) {
@@ -389,6 +418,34 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 showSortMenu = false
                 vm.changeSort(state.sortMode)
             }
+        )
+    }
+
+    // 内置图片查看器（支持左右翻页）
+    viewingImageIndex?.let { idx ->
+        val acc = state.currentAccount
+        val auth = acc?.let {
+            "Basic " + java.util.Base64.getEncoder()
+                .encodeToString("${it.username}:${it.password}".toByteArray())
+        }
+        val base = acc?.url?.trimEnd('/') ?: ""
+        ImageViewerDialog(
+            images = imageEntries,
+            initialIndex = idx,
+            baseUrl = base,
+            authHeader = auth,
+            onDismiss = { viewingImageIndex = null }
+        )
+    }
+
+    // 内置视频播放器（带播放进度记忆与断点续播）
+    playingVideoEntry?.let { (videoUri, entry) ->
+        val key = state.currentAccount?.let { "${it.url}|${entry.path}" } ?: entry.path
+        VideoPlayerDialog(
+            videoUri = videoUri,
+            videoTitle = entry.name,
+            progressKey = key,
+            onDismiss = { playingVideoEntry = null }
         )
     }
 }

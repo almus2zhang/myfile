@@ -25,6 +25,19 @@ class WebDavClient(
     private val username: String,
     private val password: String
 ) {
+    @Volatile
+    private var effectiveBaseUrl: String? = null
+
+    fun getEffectiveBaseUrl(): String {
+        effectiveBaseUrl?.let { return it }
+        synchronized(this) {
+            if (effectiveBaseUrl == null) {
+                effectiveBaseUrl = resolveEndpoint(baseUrl, client)
+            }
+            return effectiveBaseUrl!!
+        }
+    }
+
     private val authHeader: String =
         "Basic " + Base64.getEncoder().encodeToString("$username:$password".toByteArray())
 
@@ -32,13 +45,13 @@ class WebDavClient(
     fun authHeader(): String = authHeader
 
     /** 暴露 baseUrl（用于端口轮换日志） */
-    fun baseUrlString(): String = baseUrl
+    fun baseUrlString(): String = getEffectiveBaseUrl()
 
     /** 规范化路径，确保以 / 开头且拼接 baseUrl。
      *  使用 OkHttp 的 HttpUrl API 做规范化（自动编码中文字符、避免拼接错误）
      */
     private fun fullUrl(path: String): String {
-        val base = baseUrl.trim().trimEnd('/')
+        val base = getEffectiveBaseUrl().trim().trimEnd('/')
         val p = if (path.startsWith("/")) path else "/$path"
         // 用 HttpUrl 解析 + 重组，自动 URL 编码
         return try {
@@ -156,7 +169,7 @@ class WebDavClient(
      * 返回 (ok, actualBaseUrl, files)
      */
     fun probeAndList(): Triple<Boolean, String, List<FileEntry>> {
-        val base = baseUrl.trimEnd('/')
+        val base = getEffectiveBaseUrl().trimEnd('/')
         // 候选 baseUrl：原始 / 去尾斜杠 / 加 /dav / /webdav / /files
         val candidates = mutableListOf<String>()
         candidates.add(base)
@@ -361,7 +374,7 @@ class WebDavClient(
                             val href = currentHref ?: ""
                             val decoded = java.net.URLDecoder.decode(href, "UTF-8")
                             val baseUriPath = try {
-                                java.net.URI(baseUrl).path?.trimEnd('/') ?: ""
+                                java.net.URI(getEffectiveBaseUrl()).path?.trimEnd('/') ?: ""
                             } catch (e: Exception) { "" }
 
                             // 提取纯路径（去除 http(s)://host:port 前缀）
@@ -415,5 +428,80 @@ class WebDavClient(
             eventType = parser.next()
         }
         return result
+    }
+
+    companion object {
+        private const val TAG = "WebDavClient"
+
+        /**
+         * 解析 WebDAV 端点：
+         * 1. 自动跟随 HTTP 301/302/303/307/308 重定向到最终地址
+         * 2. 若访问地址直接输出包含 ip:port 的文本，则提取该 ip:port 并自动补充 http:// 前缀
+         */
+        fun resolveEndpoint(rawUrl: String, client: OkHttpClient): String {
+            var target = rawUrl.trim()
+            if (target.isBlank()) return target
+            if (!target.startsWith("http://", ignoreCase = true) && !target.startsWith("https://", ignoreCase = true)) {
+                target = "http://$target"
+            }
+
+            var hops = 0
+            while (hops < 10) {
+                hops++
+                try {
+                    val req = Request.Builder()
+                        .url(target)
+                        .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 15; V2309A Build/AP3A.240905.015.A1)")
+                        .header("Accept", "*/*")
+                        .get()
+                        .build()
+
+                    val resp = client.newCall(req).execute()
+                    val code = resp.code
+                    val location = resp.header("Location")
+                    val body = try { resp.body?.string()?.trim() ?: "" } catch (e: Exception) { "" }
+                    resp.close()
+
+                    // 1. 处理 HTTP 重定向 (301, 302, 303, 307, 308)
+                    if (code in 301..303 || code == 307 || code == 308) {
+                        if (!location.isNullOrBlank()) {
+                            val nextUrl = if (location.startsWith("http://", true) || location.startsWith("https://", true)) {
+                                location
+                            } else {
+                                target.toHttpUrlOrNull()?.resolve(location)?.toString() ?: location
+                            }
+                            Log.i(TAG, "resolveEndpoint 跟踪重定向: $target -> $nextUrl ($code)")
+                            if (nextUrl != target) {
+                                target = nextUrl
+                                continue
+                            }
+                        }
+                    }
+
+                    // 2. 处理直接输出包含 ip:port 的文本
+                    if (code in 200..299 && body.length < 500 && !body.contains("<html", ignoreCase = true) && !body.contains("<?xml", ignoreCase = true)) {
+                        val ipPortRegex = """(?:https?://)?([a-zA-Z0-9.-]+:\d{1,5}(?:/\S*)?)""".toRegex()
+                        val match = ipPortRegex.find(body)
+                        if (match != null) {
+                            var extracted = match.value.trim()
+                            if (!extracted.startsWith("http://", ignoreCase = true) && !extracted.startsWith("https://", ignoreCase = true)) {
+                                extracted = "http://$extracted"
+                            }
+                            Log.i(TAG, "resolveEndpoint 提取到纯文本 IP:端口: $extracted (原地址: $target)")
+                            if (extracted != target) {
+                                target = extracted
+                                continue
+                            }
+                        }
+                    }
+
+                    break
+                } catch (e: Exception) {
+                    Log.w(TAG, "resolveEndpoint 请求异常 $target: ${e.message}")
+                    break
+                }
+            }
+            return target
+        }
     }
 }

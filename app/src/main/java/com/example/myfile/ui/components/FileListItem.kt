@@ -35,6 +35,7 @@ fun FileListItem(
     isSelected: Boolean = false,
     thumbnailUrl: String? = null,
     thumbnailAuth: String? = null,
+    videoProgress: Float? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     Row(
@@ -51,31 +52,64 @@ fun FileListItem(
         // 图标 / 缩略图
         val category = FileOpener.fileCategory(entry.name)
         if (!entry.isDirectory && (category == "image" || category == "video") && thumbnailUrl != null) {
-            AsyncImage(
-                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                    .data(thumbnailUrl)
-                    .apply {
-                        if (thumbnailAuth != null) {
-                            addHeader("Authorization", thumbnailAuth)
-                        }
-                        if (category == "video") videoFrameMillis(1000)
-                    }
-                    .crossfade(true)
-                    .build(),
-                contentDescription = entry.name,
-                contentScale = ContentScale.Crop,
+            Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(6.dp))
-            )
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(thumbnailUrl)
+                        .memoryCacheKey("thumb_${entry.path}")
+                        .diskCacheKey("thumb_${entry.path}")
+                        .apply {
+                            if (thumbnailAuth != null) {
+                                addHeader("Authorization", thumbnailAuth)
+                            }
+                            if (category == "video") videoFrameMillis(1000)
+                        }
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = entry.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                if (category == "video" && videoProgress != null && videoProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { videoProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .align(Alignment.BottomCenter),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.Black.copy(alpha = 0.5f)
+                    )
+                }
+            }
         } else {
-            Icon(
-                imageVector = iconFor(entry.isDirectory, category),
-                contentDescription = null,
-                tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
-                else iconTint(category),
-                modifier = Modifier.size(32.dp)
-            )
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = iconFor(entry.isDirectory, category),
+                    contentDescription = null,
+                    tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
+                    else iconTint(category),
+                    modifier = Modifier.size(32.dp)
+                )
+                if (category == "video" && videoProgress != null && videoProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { videoProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .align(Alignment.BottomCenter),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -86,9 +120,12 @@ fun FileListItem(
                 overflow = TextOverflow.Ellipsis
             )
             val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+            val progressText = if (category == "video" && videoProgress != null && videoProgress > 0f) {
+                "  ·  已看 ${(videoProgress * 100).toInt()}%"
+            } else ""
             Text(
                 text = if (entry.isDirectory) "文件夹 · ${fmt.format(Date(entry.lastModified))}"
-                else "${formatSize(entry.size)}  ·  ${fmt.format(Date(entry.lastModified))}",
+                else "${formatSize(entry.size)}$progressText  ·  ${fmt.format(Date(entry.lastModified))}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

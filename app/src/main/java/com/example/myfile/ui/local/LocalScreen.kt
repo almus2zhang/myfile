@@ -1,5 +1,6 @@
 package com.example.myfile.ui.local
 
+import android.net.Uri
 import android.os.Environment
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -19,12 +20,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.myfile.MyApp
 import com.example.myfile.core.AppCandidate
 import com.example.myfile.core.FileOpener
 import com.example.myfile.model.FileEntry
 import com.example.myfile.ui.components.FileListItem
+import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
+import com.example.myfile.ui.components.VideoPlayerDialog
 import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +39,15 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     var newName by remember { mutableStateOf("") }
     var openWithRequest by remember { mutableStateOf<LocalOpenWithRequest?>(null) }
     val scope = rememberCoroutineScope()
+
+    val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
+    val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
+
+    val imageEntries = remember(state.files) {
+        state.files.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
+    }
+    var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
+    var playingVideoEntry by remember { mutableStateOf<FileEntry?>(null) }
 
     val isRoot = vm.isAtRoot(state.currentDir)
 
@@ -121,13 +135,24 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         )
                     }
                 }
+                val category = FileOpener.fileCategory(entry.name)
                 FileListItem(
                     entry = entry,
+                    thumbnailUrl = if (!entry.isDirectory) entry.path else null,
+                    videoProgress = progressMap[entry.path]?.let {
+                        if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
+                    },
                     onClick = {
                         if (state.multiSelectMode) {
                             vm.toggleSelect(entry.path)
                         } else if (entry.isDirectory) {
                             vm.open(entry)
+                        } else if (category == "image") {
+                            val idx = imageEntries.indexOfFirst { it.path == entry.path }
+                            if (idx >= 0) viewingImageIndex = idx
+                            else openEntry(forceChooser = false)
+                        } else if (category == "video") {
+                            playingVideoEntry = entry
                         } else {
                             openEntry(forceChooser = false)
                         }
@@ -206,6 +231,25 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 FileOpener.openWithSystemChooser(context, req.intent)
                 openWithRequest = null
             }
+        )
+    }
+
+    // 内置图片查看器
+    viewingImageIndex?.let { idx ->
+        ImageViewerDialog(
+            images = imageEntries,
+            initialIndex = idx,
+            onDismiss = { viewingImageIndex = null }
+        )
+    }
+
+    // 内置视频播放器（带播放进度记忆与断点续播）
+    playingVideoEntry?.let { entry ->
+        VideoPlayerDialog(
+            videoUri = Uri.fromFile(File(entry.path)),
+            videoTitle = entry.name,
+            progressKey = entry.path,
+            onDismiss = { playingVideoEntry = null }
         )
     }
 }

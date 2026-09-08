@@ -99,8 +99,11 @@ fun WebDavAccountDialog(
                             testResult = null
                             val probe = WebDavAccount(initial?.id ?: 0, name.trim().ifBlank { "probe" }, cleanUrl, user.trim(), pass)
                             kotlinx.coroutines.GlobalScope.launch {
-                                val (ok, msg) = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
+                                val (ok, msg, resolvedUrl) = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
                                 testResult = if (ok) "✓ 连接成功：$msg" else "✗ $msg"
+                                if (ok && resolvedUrl.isNotBlank() && resolvedUrl.trimEnd('/') != cleanUrl.trimEnd('/')) {
+                                    url = resolvedUrl
+                                }
                                 testing = false
                             }
                         }
