@@ -33,6 +33,8 @@ data class WebDavUiState(
                 SortMode.NAME -> compareBy { it.name.lowercase() }
                 SortMode.SIZE -> compareBy { it.size }
                 SortMode.MODIFIED -> compareBy { it.lastModified }
+                SortMode.TYPE -> compareBy<FileEntry> { it.name.substringAfterLast('.', "").lowercase() }
+                    .thenBy { it.name.lowercase() }
             }
             val ordered = if (sortAsc) cmp else cmp.reversed()
             return dirs.sortedWith(ordered) + fs.sortedWith(ordered)
@@ -42,7 +44,8 @@ data class WebDavUiState(
 enum class SortMode(val label: String) {
     NAME("名称"),
     SIZE("大小"),
-    MODIFIED("修改时间")
+    MODIFIED("时间"),
+    TYPE("类型")
 }
 
 class WebDavViewModel : ViewModel() {
@@ -179,6 +182,11 @@ class WebDavViewModel : ViewModel() {
         _state.value = _state.value.copy(message = null)
     }
 
+    /** 直接设置排序字段与升降序 */
+    fun setSort(mode: SortMode, asc: Boolean) {
+        _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+    }
+
     /** 切换排序字段；若点击同一字段则翻转方向，否则升序 */
     fun changeSort(mode: SortMode) {
         val cur = _state.value
@@ -189,10 +197,10 @@ class WebDavViewModel : ViewModel() {
         }
     }
 
-    fun refresh() {
-        val acc = _state.value.currentAccount ?: return
+    fun refresh(): kotlinx.coroutines.Job {
+        val acc = _state.value.currentAccount ?: return viewModelScope.launch {}
         val path = _state.value.currentPath
-        viewModelScope.launch {
+        return viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             try {
                 val files = repo.list(acc, path)

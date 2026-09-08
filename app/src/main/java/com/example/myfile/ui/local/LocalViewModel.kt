@@ -14,11 +14,28 @@ import java.io.File
 data class LocalUiState(
     val currentDir: File = File(Environment.getExternalStorageDirectory().absolutePath),
     val files: List<FileEntry> = emptyList(),
+    val sortMode: com.example.myfile.ui.webdav.SortMode = com.example.myfile.ui.webdav.SortMode.NAME,
+    val sortAsc: Boolean = true,
     val selected: Set<String> = emptySet(),
     val multiSelectMode: Boolean = false,
     val message: String? = null,
     val isRefreshing: Boolean = false
-)
+) {
+    val sortedFiles: List<FileEntry>
+        get() {
+            val dirs = files.filter { it.isDirectory }
+            val fs = files.filter { !it.isDirectory }
+            val cmp: Comparator<FileEntry> = when (sortMode) {
+                com.example.myfile.ui.webdav.SortMode.NAME -> compareBy { it.name.lowercase() }
+                com.example.myfile.ui.webdav.SortMode.SIZE -> compareBy { it.size }
+                com.example.myfile.ui.webdav.SortMode.MODIFIED -> compareBy { it.lastModified }
+                com.example.myfile.ui.webdav.SortMode.TYPE -> compareBy<FileEntry> { it.name.substringAfterLast('.', "").lowercase() }
+                    .thenBy { it.name.lowercase() }
+            }
+            val ordered = if (sortAsc) cmp else cmp.reversed()
+            return dirs.sortedWith(ordered) + fs.sortedWith(ordered)
+        }
+}
 
 class LocalViewModel : ViewModel() {
     private val repo = MyApp.instance.localRepo
@@ -28,15 +45,19 @@ class LocalViewModel : ViewModel() {
 
     init { refresh() }
 
+    fun setSort(mode: com.example.myfile.ui.webdav.SortMode, asc: Boolean) {
+        _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+    }
+
     fun isAtRoot(dir: File = _state.value.currentDir): Boolean {
         val rootCanonical = try { rootDir.canonicalPath } catch (e: Exception) { rootDir.absolutePath }
         val dirCanonical = try { dir.canonicalPath } catch (e: Exception) { dir.absolutePath }
         return dirCanonical == rootCanonical || !dirCanonical.startsWith(rootCanonical) || dir.parentFile == null
     }
 
-    fun refresh() {
+    fun refresh(): kotlinx.coroutines.Job {
         val dir = _state.value.currentDir
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        return viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _state.value = _state.value.copy(isRefreshing = true)
             val list = repo.list(dir)
             _state.value = _state.value.copy(files = list, currentDir = dir, isRefreshing = false)

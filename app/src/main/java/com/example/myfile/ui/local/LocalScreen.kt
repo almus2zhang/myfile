@@ -10,9 +10,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontWeight
+import com.example.myfile.ui.webdav.SortMode
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,25 +59,27 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
         }
     }
 
+    var showSortMenu by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
+    val refreshRotation = remember { Animatable(0f) }
     if (pullRefreshState.isRefreshing) {
         LaunchedEffect(true) {
-            vm.refresh()
-        }
-    }
-    LaunchedEffect(state.isRefreshing) {
-        if (state.isRefreshing) {
-            pullRefreshState.startRefresh()
-        } else {
+            val refreshJob = vm.refresh()
+            refreshRotation.animateTo(
+                targetValue = 360f,
+                animationSpec = tween(durationMillis = 650, easing = LinearEasing)
+            )
+            refreshJob.join()
             pullRefreshState.endRefresh()
+            refreshRotation.snapTo(0f)
         }
     }
 
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
 
-    val imageEntries = remember(state.files) {
-        state.files.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
+    val imageEntries = remember(state.sortedFiles) {
+        state.sortedFiles.filter { !it.isDirectory && FileOpener.fileCategory(it.name) == "image" }
     }
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
     var currentWatchingVideoKey by remember { mutableStateOf<String?>(null) }
@@ -149,6 +157,47 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(Icons.Filled.Sort, "排序")
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            listOf(
+                                Triple(SortMode.NAME, true, "名称 ↑"),
+                                Triple(SortMode.NAME, false, "名称 ↓"),
+                                Triple(SortMode.SIZE, true, "大小 ↑"),
+                                Triple(SortMode.SIZE, false, "大小 ↓"),
+                                Triple(SortMode.MODIFIED, true, "时间 ↑"),
+                                Triple(SortMode.MODIFIED, false, "时间 ↓"),
+                                Triple(SortMode.TYPE, true, "类型 ↑"),
+                                Triple(SortMode.TYPE, false, "类型 ↓")
+                            ).forEach { (mode, asc, label) ->
+                                val isSelected = state.sortMode == mode && state.sortAsc == asc
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = if (isSelected) {
+                                        { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        showSortMenu = false
+                                        vm.setSort(mode, asc)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = { vm.refresh() }) {
+                        Icon(Icons.Filled.Refresh, "刷新")
+                    }
                     if (!isRoot) {
                         IconButton(onClick = { vm.goUp() }) {
                             Icon(Icons.Filled.ArrowUpward, "上级")
@@ -212,7 +261,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(state.files, key = { it.path }) { entry: FileEntry ->
+                items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
                 fun openEntry(forceChooser: Boolean) {
                     val file = java.io.File(entry.path)
                     val intent = FileOpener.buildLocalViewIntent(context, file) ?: return
@@ -327,10 +376,32 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 HorizontalDivider()
             }
         }
-        PullToRefreshContainer(
-            state = pullRefreshState,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
+        if (pullRefreshState.verticalOffset > 0.5f || pullRefreshState.isRefreshing) {
+            PullToRefreshContainer(
+                state = pullRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter),
+                indicator = { s ->
+                    val rot = if (s.isRefreshing) {
+                        refreshRotation.value
+                    } else {
+                        (s.verticalOffset * 2.5f) % 360f
+                    }
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "刷新",
+                            modifier = Modifier
+                                .size(22.dp)
+                                .graphicsLayer { rotationZ = rot },
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            )
+        }
     }
 }
 

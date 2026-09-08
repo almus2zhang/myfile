@@ -19,9 +19,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,16 +65,17 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     }
 
     val pullRefreshState = rememberPullToRefreshState()
+    val refreshRotation = remember { Animatable(0f) }
     if (pullRefreshState.isRefreshing) {
         LaunchedEffect(true) {
-            vm.refresh()
-        }
-    }
-    LaunchedEffect(state.loading) {
-        if (state.loading) {
-            pullRefreshState.startRefresh()
-        } else {
+            val refreshJob = vm.refresh()
+            refreshRotation.animateTo(
+                targetValue = 360f,
+                animationSpec = tween(durationMillis = 650, easing = LinearEasing)
+            )
+            refreshJob.join()
             pullRefreshState.endRefresh()
+            refreshRotation.snapTo(0f)
         }
     }
 
@@ -173,7 +179,42 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showSortMenu = true }) { Icon(Icons.Filled.Sort, "排序") }
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) { Icon(Icons.Filled.Sort, "排序") }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            listOf(
+                                Triple(SortMode.NAME, true, "名称 ↑"),
+                                Triple(SortMode.NAME, false, "名称 ↓"),
+                                Triple(SortMode.SIZE, true, "大小 ↑"),
+                                Triple(SortMode.SIZE, false, "大小 ↓"),
+                                Triple(SortMode.MODIFIED, true, "时间 ↑"),
+                                Triple(SortMode.MODIFIED, false, "时间 ↓"),
+                                Triple(SortMode.TYPE, true, "类型 ↑"),
+                                Triple(SortMode.TYPE, false, "类型 ↓")
+                            ).forEach { (mode, asc, label) ->
+                                val isSelected = state.sortMode == mode && state.sortAsc == asc
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = if (isSelected) {
+                                        { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        showSortMenu = false
+                                        vm.setSort(mode, asc)
+                                    }
+                                )
+                            }
+                        }
+                    }
                     IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, "刷新") }
                 }
             )
@@ -539,10 +580,32 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 }
             }
 
-            PullToRefreshContainer(
-                state = pullRefreshState,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
+            if (pullRefreshState.verticalOffset > 0.5f || pullRefreshState.isRefreshing) {
+                PullToRefreshContainer(
+                    state = pullRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    indicator = { s ->
+                        val rot = if (s.isRefreshing) {
+                            refreshRotation.value
+                        } else {
+                            (s.verticalOffset * 2.5f) % 360f
+                        }
+                        Box(
+                            modifier = Modifier.size(40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "刷新",
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .graphicsLayer { rotationZ = rot },
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                )
+            }
         }
     }
         }
@@ -611,35 +674,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     FileOpener.openWithSystemChooser(context, req.intent)
                 }
                 openWithRequest = null
-            }
-        )
-    }
-
-    // 排序菜单
-    DropdownMenu(
-        expanded = showSortMenu,
-        onDismissRequest = { showSortMenu = false }
-    ) {
-        SortMode.entries.forEach { mode ->
-            val isCurrent = state.sortMode == mode
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        "${mode.label}${if (isCurrent) (if (state.sortAsc) " ↑" else " ↓") else ""}"
-                    )
-                },
-                onClick = {
-                    showSortMenu = false
-                    vm.changeSort(mode)
-                }
-            )
-        }
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text(if (state.sortAsc) "降序" else "升序") },
-            onClick = {
-                showSortMenu = false
-                vm.changeSort(state.sortMode)
             }
         )
     }
