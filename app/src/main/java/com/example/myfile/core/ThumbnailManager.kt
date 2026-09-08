@@ -24,19 +24,20 @@ object ThumbnailManager {
 
     private const val TAG = "ThumbnailManager"
 
-    private fun getCacheFile(context: Context, key: String): File {
+    private fun getCacheFile(context: Context, key: String, isPng: Boolean = false): File {
         val hash = MessageDigest.getInstance("MD5")
             .digest(key.toByteArray())
             .joinToString("") { "%02x".format(it) }
         val dir = File(context.cacheDir, "thumb_cache").apply { if (!exists()) mkdirs() }
-        return File(dir, "$hash.png")
+        val ext = if (isPng) "png" else "jpg"
+        return File(dir, "$hash.$ext")
     }
 
     /**
      * 检查本地是否已有缓存的缩略图文件
      */
-    fun getCachedThumbnail(context: Context, key: String): File? {
-        val file = getCacheFile(context, key)
+    fun getCachedThumbnail(context: Context, key: String, isPng: Boolean = false): File? {
+        val file = getCacheFile(context, key, isPng)
         return if (file.exists() && file.length() > 0) file else null
     }
 
@@ -46,10 +47,10 @@ object ThumbnailManager {
     fun getOrFetchLocalApkThumb(context: Context, apkFile: File): File? {
         if (!apkFile.exists() || !apkFile.isFile || apkFile.length() <= 0) return null
         val key = "local_apk_${apkFile.absolutePath}_${apkFile.lastModified()}_${apkFile.length()}"
-        val cached = getCachedThumbnail(context, key)
+        val cached = getCachedThumbnail(context, key, isPng = true)
         if (cached != null) return cached
 
-        val targetFile = getCacheFile(context, key)
+        val targetFile = getCacheFile(context, key, isPng = true)
         return try {
             val pm = context.packageManager
             val pi = pm.getPackageArchiveInfo(apkFile.absolutePath, 0) ?: return null
@@ -191,7 +192,7 @@ object ThumbnailManager {
         entry: FileEntry
     ): File? = withContext(Dispatchers.IO) {
         val key = "acc_${account.id}|${entry.path}|apk"
-        val cached = getCachedThumbnail(context, key)
+        val cached = getCachedThumbnail(context, key, isPng = true)
         if (cached != null) return@withContext cached
 
         if (entry.size <= 0) return@withContext null
@@ -201,7 +202,7 @@ object ThumbnailManager {
         val auth = "Basic " + java.util.Base64.getEncoder()
             .encodeToString("${account.username}:${account.password}".toByteArray())
 
-        val targetFile = getCacheFile(context, key)
+        val targetFile = getCacheFile(context, key, isPng = true)
 
         try {
             // 1. 请求 APK 末尾 64KB 读取 ZIP EOCD (End of Central Directory)

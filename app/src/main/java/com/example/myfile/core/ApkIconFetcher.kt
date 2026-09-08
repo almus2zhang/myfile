@@ -2,15 +2,12 @@ package com.example.myfile.core
 
 import coil.ImageLoader
 import coil.decode.DataSource
-import coil.decode.ImageSource
+import coil.fetch.DrawableResult
 import coil.fetch.FetchResult
 import coil.fetch.Fetcher
-import coil.fetch.SourceResult
 import coil.request.Options
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okio.buffer
-import okio.source
 import java.io.File
 
 class ApkIconFetcher(
@@ -19,13 +16,23 @@ class ApkIconFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? = withContext(Dispatchers.IO) {
-        val thumbFile = ThumbnailManager.getOrFetchLocalApkThumb(options.context, apkFile) ?: return@withContext null
-        val source = thumbFile.source().buffer()
-        SourceResult(
-            source = ImageSource(source = source, context = options.context),
-            mimeType = "image/png",
-            dataSource = DataSource.DISK
-        )
+        if (!apkFile.exists() || !apkFile.isFile || apkFile.length() <= 0) return@withContext null
+        try {
+            val context = options.context
+            val pm = context.packageManager
+            val pi = pm.getPackageArchiveInfo(apkFile.absolutePath, 0) ?: return@withContext null
+            val appInfo = pi.applicationInfo ?: return@withContext null
+            appInfo.sourceDir = apkFile.absolutePath
+            appInfo.publicSourceDir = apkFile.absolutePath
+            val drawable = appInfo.loadIcon(pm) ?: return@withContext null
+            DrawableResult(
+                drawable = drawable,
+                isSampled = false,
+                dataSource = DataSource.DISK
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     class Factory : Fetcher.Factory<File> {

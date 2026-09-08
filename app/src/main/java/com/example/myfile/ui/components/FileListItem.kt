@@ -18,11 +18,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImagePainter
-import coil.compose.rememberAsyncImagePainter
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.example.myfile.model.FileEntry
@@ -72,63 +70,56 @@ fun FileListItem(
         if (hasThumbnail && thumbnailUrl != null) {
             val isApk = visualType == VisualType.APK
             val cKey = thumbnailKey ?: "thumb_${entry.path}"
-            val painter = rememberAsyncImagePainter(
-                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                    .data(thumbnailUrl)
-                    .memoryCacheKey(cKey)
-                    .diskCacheKey(cKey)
-                    .apply {
-                        if (thumbnailAuth != null) {
-                            addHeader("Authorization", thumbnailAuth)
-                        }
-                        if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
-                    }
-                    .crossfade(true)
-                    .build()
-            )
-            val isSuccess = painter.state is AsyncImagePainter.State.Success
 
             Box(
                 modifier = Modifier
                     .size(46.dp)
-                    .clip(RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp))
+                    .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
                     .background(
-                        if (isSuccess) {
-                            if (isApk) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            visualType.tintColor.copy(alpha = 0.14f)
-                        }
+                        if (isApk) visualType.tintColor.copy(alpha = 0.14f)
+                        else MaterialTheme.colorScheme.surfaceVariant
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (isSuccess) {
-                    Image(
-                        painter = painter,
-                        contentDescription = entry.name,
-                        contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(if (isApk) 4.dp else 0.dp)
-                    )
-                } else {
-                    Icon(
-                        imageVector = visualType.icon,
-                        contentDescription = null,
-                        tint = visualType.tintColor,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
+                // 底层：默认彩色类别图标（加载中或失败时显示）
+                Icon(
+                    imageVector = visualType.icon,
+                    contentDescription = null,
+                    tint = visualType.tintColor,
+                    modifier = Modifier.size(26.dp)
+                )
+
+                // 顶层：Coil 异步加载图片、视频与 APK 真实缩略图
+                AsyncImage(
+                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(thumbnailUrl)
+                        .memoryCacheKey(cKey)
+                        .diskCacheKey(cKey)
+                        .apply {
+                            if (thumbnailAuth != null) {
+                                addHeader("Authorization", thumbnailAuth)
+                            }
+                            if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
+                        }
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = entry.name,
+                    contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
+                        .padding(if (isApk) 4.dp else 0.dp)
+                )
 
                 // 柔和微边框，增强在浅色/深色背景下的视觉边界感
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp))
+                        .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
                         .border(
                             width = 0.5.dp,
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp)
+                            shape = RoundedCornerShape(if (isApk) 12.dp else 10.dp)
                         )
                 )
 
