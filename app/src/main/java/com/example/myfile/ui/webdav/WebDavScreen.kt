@@ -72,11 +72,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     if (pullRefreshState.isRefreshing) {
         LaunchedEffect(true) {
             val refreshJob = vm.refresh()
-            refreshRotation.animateTo(
-                targetValue = 360f,
-                animationSpec = tween(durationMillis = 650, easing = LinearEasing)
-            )
-            refreshJob.join()
+            do {
+                refreshRotation.animateTo(
+                    targetValue = 360f,
+                    animationSpec = tween(durationMillis = 300, easing = LinearEasing)
+                )
+                refreshRotation.snapTo(0f)
+            } while (refreshJob.isActive)
+            kotlinx.coroutines.delay(180)
             pullRefreshState.endRefresh()
             refreshRotation.snapTo(0f)
         }
@@ -633,7 +636,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         val rot = if (s.isRefreshing) {
                             refreshRotation.value
                         } else {
-                            (s.verticalOffset * 2.5f) % 360f
+                            (s.verticalOffset * 5f) % 360f
                         }
                         Box(
                             modifier = Modifier.size(40.dp),
