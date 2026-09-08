@@ -9,6 +9,7 @@ import com.example.myfile.model.WebDavAccount
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
@@ -59,11 +60,17 @@ fun WebDavAccountDialog(
                         enabled = !testing && url.isNotBlank() && user.isNotBlank(),
                         onClick = {
                             val cleanUrl = cleanWebDavUrl(url)
-                            if (cleanUrl.toHttpUrlOrNull() == null) {
-                                testResult = "✗ URL 格式不正确，请检查地址或端口"
+                            url = cleanUrl
+                            val errorMsg = try {
+                                cleanUrl.toHttpUrl()
+                                null
+                            } catch (e: Exception) {
+                                e.message ?: "格式无法解析"
+                            }
+                            if (errorMsg != null) {
+                                testResult = "✗ URL 格式错误: $errorMsg"
                                 return@OutlinedButton
                             }
-                            url = cleanUrl
                             testing = true
                             testResult = null
                             val probe = WebDavAccount(initial?.id ?: 0, name.trim().ifBlank { "probe" }, cleanUrl, user.trim(), pass)
@@ -100,17 +107,32 @@ fun WebDavAccountDialog(
     )
 }
 
-/** 清洗并规范化 WebDAV URL，纠正重复协议、空格、缺少协议等常见输入错误 */
+/** 清洗并规范化 WebDAV URL，纠正全角字符、不可见字符、空格、重复协议等常见输入错误 */
 fun cleanWebDavUrl(raw: String): String {
-    var s = raw.trim()
-    if (s.isBlank()) return ""
-    // 替换中文全角冒号与斜杠
-    s = s.replace('：', ':').replace('／', '/')
-    // 移除末尾意外跟随的 http(s) 片段，如 " httphttp:" 或 " http://"
-    s = s.replace(Regex("""\s+(https?)+:?/*$""", RegexOption.IGNORE_CASE), "")
-    // 移除数字或路径尾部意外黏附的协议头（如 1.2.3.4:5http:// 或 1.2.3.4:5http）
+    if (raw.isBlank()) return ""
+    var s = raw
+    // 1. 移除常见不可见字符、零宽字符、BOM与不换行空格
+    s = s.replace(Regex("""[\u200B\u200C\u200D\uFEFF\u00A0\u2028\u2029\u200E\u200F]"""), "")
+    // 2. 全角转半角 (全角冒号, 全角句号/点, 全角斜杠, 全角数字, 全角字母)
+    val sb = StringBuilder()
+    for (c in s) {
+        when {
+            c == '：' -> sb.append(':')
+            c == '。' || c == '．' -> sb.append('.')
+            c == '／' -> sb.append('/')
+            c in '０'..'９' -> sb.append((c - '０' + '0'.code).toChar())
+            c in 'ａ'..'ｚ' -> sb.append((c - 'ａ' + 'a'.code).toChar())
+            c in 'Ａ'..'Ｚ' -> sb.append((c - 'Ａ' + 'A'.code).toChar())
+            else -> sb.append(c)
+        }
+    }
+    s = sb.toString()
+    // 3. 移除所有空白字符（包括空格、制表符、换行符）
+    s = s.replace(Regex("""\s+"""), "")
+    // 4. 清理末尾意外跟随的 http(s) 片段，如 "httphttp:" 或 "http://"
+    s = s.replace(Regex("""(https?)+:?/*$""", RegexOption.IGNORE_CASE), "")
     s = s.replace(Regex("""(?<=\d|/)(https?://*)+$""", RegexOption.IGNORE_CASE), "")
-    // 处理多重重复的前缀，例如 http://http:// 或 https://http:// 等
+    // 5. 处理多重重复的前缀，例如 http://http:// 或 https://http:// 等
     while (s.startsWith("http://http://", ignoreCase = true) ||
         s.startsWith("http://https://", ignoreCase = true) ||
         s.startsWith("https://http://", ignoreCase = true) ||
@@ -118,7 +140,7 @@ fun cleanWebDavUrl(raw: String): String {
     ) {
         s = s.substring(s.indexOf("://") + 3)
     }
-    // 如果没有 http:// 或 https:// 前缀，自动补齐 http://
+    // 6. 如果没有 http:// 或 https:// 前缀，自动补齐 http://
     if (!s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) {
         s = "http://$s"
     }
