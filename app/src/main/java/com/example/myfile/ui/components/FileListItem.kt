@@ -18,9 +18,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.example.myfile.model.FileEntry
@@ -62,45 +64,74 @@ fun FileListItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 图标 / 缩略图区域
-        val isMedia = !entry.isDirectory && (visualType == VisualType.IMAGE || visualType == VisualType.VIDEO)
-        if (isMedia && thumbnailUrl != null) {
+        val hasThumbnail = !entry.isDirectory && (
+            visualType == VisualType.IMAGE ||
+            visualType == VisualType.VIDEO ||
+            visualType == VisualType.APK
+        )
+        if (hasThumbnail && thumbnailUrl != null) {
+            val isApk = visualType == VisualType.APK
+            val cKey = thumbnailKey ?: "thumb_${entry.path}"
+            val painter = rememberAsyncImagePainter(
+                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    .data(thumbnailUrl)
+                    .memoryCacheKey(cKey)
+                    .diskCacheKey(cKey)
+                    .apply {
+                        if (thumbnailAuth != null) {
+                            addHeader("Authorization", thumbnailAuth)
+                        }
+                        if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
+                    }
+                    .crossfade(true)
+                    .build()
+            )
+            val isSuccess = painter.state is AsyncImagePainter.State.Success
+
             Box(
                 modifier = Modifier
                     .size(46.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                val cKey = thumbnailKey ?: "thumb_${entry.path}"
-                AsyncImage(
-                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                        .data(thumbnailUrl)
-                        .memoryCacheKey(cKey)
-                        .diskCacheKey(cKey)
-                        .apply {
-                            if (thumbnailAuth != null) {
-                                addHeader("Authorization", thumbnailAuth)
-                            }
-                            if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
+                    .clip(RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp))
+                    .background(
+                        if (isSuccess) {
+                            if (isApk) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        } else {
+                            visualType.tintColor.copy(alpha = 0.14f)
                         }
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = entry.name,
-                    contentScale = ContentScale.Crop,
-                    error = androidx.compose.ui.graphics.vector.rememberVectorPainter(visualType.icon),
-                    fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(visualType.icon),
-                    modifier = Modifier.fillMaxSize()
-                )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSuccess) {
+                    Image(
+                        painter = painter,
+                        contentDescription = entry.name,
+                        contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(if (isApk) 4.dp else 0.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = visualType.icon,
+                        contentDescription = null,
+                        tint = visualType.tintColor,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+
                 // 柔和微边框，增强在浅色/深色背景下的视觉边界感
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp))
                         .border(
                             width = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                            shape = RoundedCornerShape(10.dp)
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(if (isApk && !isSuccess) 12.dp else 10.dp)
                         )
                 )
+
                 if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
                     LinearProgressIndicator(
                         progress = { videoProgress.coerceIn(0f, 1f) },

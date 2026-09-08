@@ -391,6 +391,11 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     val intent = FileOpener.buildLocalViewIntent(context, file) ?: return
                     val category = FileOpener.fileCategory(entry.name)
                     scope.launch {
+                        if (!forceChooser && category == "apk") {
+                            com.example.myfile.core.ApkInstaller.install(context, file)
+                            return@launch
+                        }
+
                         if (category == "video") {
                             val saved = MyApp.instance.db.videoProgressDao().get(entry.path)
                             if (saved != null && saved.positionMs > 1000L) {
@@ -466,6 +471,8 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         } else if (entry.isDirectory) {
                             vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
                             vm.open(entry)
+                        } else if (category == "apk") {
+                            com.example.myfile.core.ApkInstaller.install(context, java.io.File(entry.path))
                         } else if (category == "image") {
                             val idx = imageEntries.indexOfFirst { it.path == entry.path }
                             if (idx >= 0) viewingImageIndex = idx

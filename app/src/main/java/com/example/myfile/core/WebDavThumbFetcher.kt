@@ -1,4 +1,4 @@
-﻿package com.example.myfile.core
+package com.example.myfile.core
 
 import coil.ImageLoader
 import coil.decode.DataSource
@@ -23,16 +23,25 @@ class WebDavThumbFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? {
-        val file = ThumbnailManager.getOrFetchWebDavImageThumb(
-            options.context,
-            data.account,
-            data.entry
-        ) ?: return null
+        val ext = data.entry.name.substringAfterLast('.', "").lowercase()
+        val file = if (ext == "apk") {
+            ThumbnailManager.getOrFetchWebDavApkThumb(
+                options.context,
+                data.account,
+                data.entry
+            )
+        } else {
+            ThumbnailManager.getOrFetchWebDavImageThumb(
+                options.context,
+                data.account,
+                data.entry
+            )
+        } ?: return null
 
         val source = file.source().buffer()
         return SourceResult(
             source = ImageSource(source = source, context = options.context),
-            mimeType = "image/jpeg",
+            mimeType = if (file.name.endsWith(".png")) "image/png" else "image/jpeg",
             dataSource = DataSource.DISK
         )
     }

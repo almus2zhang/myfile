@@ -31,6 +31,8 @@ class MyApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .components {
+                add(com.example.myfile.core.ApkIconFetcher.Factory())
+                add(com.example.myfile.core.ApkIconFetcher.StringFactory())
                 add(com.example.myfile.core.WebDavThumbFetcher.Factory())
                 add(VideoFrameDecoder.Factory())
             }

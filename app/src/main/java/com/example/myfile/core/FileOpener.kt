@@ -152,7 +152,8 @@ object FileOpener {
     private fun guessMime(name: String): String {
         val ext = name.substringAfterLast('.', "").lowercase()
         if (ext.isEmpty()) return "*/*"
-        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: when (ext) {
+        return when (ext) {
+            "apk" -> "application/vnd.android.package-archive"
             "txt", "log" -> "text/plain"
             "mkv" -> "video/x-matroska"
             "webm" -> "video/webm"
@@ -164,7 +165,7 @@ object FileOpener {
             "wmv" -> "video/x-ms-wmv"
             "3gp" -> "video/3gpp"
             "mpg", "mpeg" -> "video/mpeg"
-            else -> "*/*"
+            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
         }
     }
 

@@ -499,6 +499,23 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             if (acc == null) return
                             scope.launch {
                                 val appCtx = context.applicationContext
+
+                                if (category == "apk" && !forceChooser) {
+                                    snackbarHostState.showSnackbar("正在准备安装包...", duration = SnackbarDuration.Short)
+                                    val tmp = FileOpener.downloadToCache(
+                                        client = com.example.myfile.MyApp.instance.okHttpClient,
+                                        authHeader = auth ?: "",
+                                        url = fullUrl,
+                                        fileName = entry.name
+                                    )
+                                    if (tmp != null && tmp.exists()) {
+                                        com.example.myfile.core.ApkInstaller.install(context, tmp)
+                                    } else {
+                                        snackbarHostState.showSnackbar("下载安装包失败")
+                                    }
+                                    return@launch
+                                }
+
                                 var intent = if (FileOpener.isVideo(entry.name)) {
                                     val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
                                     FileOpener.buildVideoStreamIntent(
@@ -583,7 +600,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         FileListItem(
                             entry = entry,
                             thumbnailUrl = if (!entry.isDirectory) {
-                                if (category == "image" && acc != null) {
+                                if ((category == "image" || category == "apk") && acc != null) {
                                     com.example.myfile.core.WebDavThumbRequest(acc, entry)
                                 } else {
                                     fullUrl

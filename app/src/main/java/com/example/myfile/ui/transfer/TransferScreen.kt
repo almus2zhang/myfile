@@ -114,17 +114,22 @@ private fun TaskCard(task: TransferTask, vm: TransferViewModel) {
                         OutlinedButton(onClick = { vm.cancel(task.id) }) { Text("取消") }
                     }
                     TransferStatus.COMPLETED -> {
+                        val isApk = task.fileName.endsWith(".apk", ignoreCase = true)
                         Button(onClick = {
                             val f = java.io.File(task.localPath)
                             if (f.exists()) {
-                                com.example.myfile.core.FileOpener.buildLocalViewIntent(context, f)?.let {
-                                    try {
-                                        context.startActivity(it)
-                                    } catch (_: Exception) {}
+                                if (isApk) {
+                                    com.example.myfile.core.ApkInstaller.install(context, f)
+                                } else {
+                                    com.example.myfile.core.FileOpener.buildLocalViewIntent(context, f)?.let {
+                                        try {
+                                            context.startActivity(it)
+                                        } catch (_: Exception) {}
+                                    }
                                 }
                             }
                         }) {
-                            Text("打开文件")
+                            Text(if (isApk) "安装" else "打开文件")
                         }
                     }
                     else -> {}
