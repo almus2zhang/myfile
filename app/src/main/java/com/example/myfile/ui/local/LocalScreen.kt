@@ -131,11 +131,14 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 for (v in videoEntries) {
                     val saved = MyApp.instance.db.videoProgressDao().get(v.path)
                     if (saved == null || saved.durationMs <= 0L) {
+                        val mmr = android.media.MediaMetadataRetriever()
                         try {
-                            val mmr = android.media.MediaMetadataRetriever()
-                            mmr.setDataSource(v.path)
+                            if (v.path.startsWith("content://")) {
+                                mmr.setDataSource(context, android.net.Uri.parse(v.path))
+                            } else {
+                                mmr.setDataSource(v.path)
+                            }
                             val dur = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                            mmr.release()
                             if (dur > 0L) {
                                 MyApp.instance.db.videoProgressDao().save(
                                     VideoProgressEntity(
@@ -146,7 +149,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                     )
                                 )
                             }
-                        } catch (_: Exception) {}
+                        } catch (_: Exception) {
+                        } finally {
+                            try { mmr.release() } catch (_: Exception) {}
+                        }
                     }
                 }
             }
@@ -160,6 +166,8 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     var currentWatchingVideoKey by remember { mutableStateOf<String?>(null) }
     var renamingEntry by remember { mutableStateOf<FileEntry?>(null) }
     var propertiesEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var deletingEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
 
     val externalLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -329,7 +337,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         Text("复制 (${state.selected.size})")
                     }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { vm.deleteSelected() }) {
+                    IconButton(onClick = { showBatchDeleteConfirm = true }) {
                         Icon(Icons.Filled.Delete, "删除")
                     }
                     TextButton(onClick = { vm.clearSelection() }) {
@@ -566,7 +574,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                         leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
                                         onClick = {
                                             showMenu = false
-                                            vm.deleteOne(entry)
+                                            deletingEntry = entry
                                         }
                                     )
                                 }
@@ -705,6 +713,30 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             videoDurationMs = vProg?.durationMs,
             videoPositionMs = vProg?.positionMs,
             onDismiss = { propertiesEntry = null }
+        )
+    }
+
+    // 单项删除确认对话框
+    deletingEntry?.let { entry ->
+        com.example.myfile.ui.components.DeleteConfirmDialog(
+            title = "确认删除",
+            message = "确定要删除${if (entry.isDirectory) "文件夹" else "文件"} \"${entry.name}\" 吗？此操作无法撤销。",
+            onDismiss = { deletingEntry = null },
+            onConfirm = {
+                vm.deleteOne(entry)
+            }
+        )
+    }
+
+    // 批量删除确认对话框
+    if (showBatchDeleteConfirm) {
+        com.example.myfile.ui.components.DeleteConfirmDialog(
+            title = "确认批量删除",
+            message = "确定要删除选中的 ${state.selected.size} 个项目吗？此操作无法撤销。",
+            onDismiss = { showBatchDeleteConfirm = false },
+            onConfirm = {
+                vm.deleteSelected()
+            }
         )
     }
 }

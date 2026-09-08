@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -133,10 +135,54 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     var openWithRequest by remember { mutableStateOf<OpenWithRequest?>(null) }
     var renamingEntry by remember { mutableStateOf<FileEntry?>(null) }
     var propertiesEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var deletingEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var showTrafficDebug by remember { mutableStateOf(false) }
     val activeTransfers by com.example.myfile.core.TrafficMonitor.activeTransfers.collectAsState()
     val totalSpeed by com.example.myfile.core.TrafficMonitor.totalDownloadSpeed.collectAsState()
     val scope = rememberCoroutineScope()
+
+    // WebDAV 视频：后台异步探查视频时长（基于轻量 HTTP Range 读取文件头与 moov 索引，0 全量下载）
+    LaunchedEffect(state.files, currentSettings.showVideoDuration) {
+        if (!currentSettings.showVideoDuration) return@LaunchedEffect
+        val acc = state.currentAccount ?: return@LaunchedEffect
+        val videoEntries = state.files.filter { !it.isDirectory && FileOpener.isVideo(it.name) }
+        if (videoEntries.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                val auth = "Basic " + java.util.Base64.getEncoder()
+                    .encodeToString("${acc.username}:${acc.password}".toByteArray())
+                for (v in videoEntries) {
+                    val videoKey = "${acc.id}_${v.path}"
+                    val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
+                    if (saved == null || saved.durationMs <= 0L) {
+                        val mmr = android.media.MediaMetadataRetriever()
+                        try {
+                            val p = if (v.path.startsWith("/")) v.path else "/${v.path}"
+                            val fullUrl = acc.connectionUrl().trimEnd('/') + p
+                            val headers = HashMap<String, String>()
+                            headers["Authorization"] = auth
+                            headers["User-Agent"] = "myfile/1.0 (Android; WebDAV)"
+                            mmr.setDataSource(fullUrl, headers)
+                            val dur = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            if (dur > 0L) {
+                                MyApp.instance.db.videoProgressDao().save(
+                                    com.example.myfile.data.db.entity.VideoProgressEntity(
+                                        uriKey = videoKey,
+                                        positionMs = saved?.positionMs ?: 0L,
+                                        durationMs = dur,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        } catch (_: Exception) {
+                        } finally {
+                            try { mmr.release() } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     val externalLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -315,7 +361,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         Text("复制 (${state.selected.size})")
                     }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { vm.deleteSelected() }) {
+                    IconButton(onClick = { showBatchDeleteConfirm = true }) {
                         Icon(Icons.Filled.Delete, "删除")
                     }
                     TextButton(onClick = { vm.clearSelection() }) {
@@ -786,7 +832,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
                                                 onClick = {
                                                     showMenu = false
-                                                    vm.delete(entry)
+                                                    deletingEntry = entry
                                                 }
                                             )
                                         }
@@ -964,6 +1010,30 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             videoDurationMs = vProg?.durationMs,
             videoPositionMs = vProg?.positionMs,
             onDismiss = { propertiesEntry = null }
+        )
+    }
+
+    // 单项删除确认对话框
+    deletingEntry?.let { entry ->
+        com.example.myfile.ui.components.DeleteConfirmDialog(
+            title = "确认删除",
+            message = "确定要删除${if (entry.isDirectory) "文件夹" else "文件"} \"${entry.name}\" 吗？此操作无法撤销。",
+            onDismiss = { deletingEntry = null },
+            onConfirm = {
+                vm.delete(entry)
+            }
+        )
+    }
+
+    // 批量删除确认对话框
+    if (showBatchDeleteConfirm) {
+        com.example.myfile.ui.components.DeleteConfirmDialog(
+            title = "确认批量删除",
+            message = "确定要删除选中的 ${state.selected.size} 个项目吗？此操作无法撤销。",
+            onDismiss = { showBatchDeleteConfirm = false },
+            onConfirm = {
+                vm.deleteSelected()
+            }
         )
     }
 }

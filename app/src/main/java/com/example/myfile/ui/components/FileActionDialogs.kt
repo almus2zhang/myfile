@@ -187,10 +187,9 @@ fun FilePropertiesDialog(
                 if (visualType == VisualType.VIDEO && videoDurationMs != null && videoDurationMs > 0L) {
                     PropertyItem(label = "视频总时长", value = formatDuration(videoDurationMs))
                     if (videoPositionMs != null && videoPositionMs > 1000L) {
-                        val progressPct = (videoPositionMs.toFloat() / videoDurationMs * 100).toInt()
                         PropertyItem(
-                            label = "上次播放",
-                            value = "${formatDuration(videoPositionMs)}  (已看 $progressPct%)"
+                            label = "播放进度",
+                            value = "${formatDuration(videoPositionMs)} / ${formatDuration(videoDurationMs)}"
                         )
                     }
                 }
@@ -245,4 +244,42 @@ private fun PropertyItem(
             lineHeight = if (isPath) 17.sp else 20.sp
         )
     }
+}
+
+@Composable
+fun DeleteConfirmDialog(
+    title: String = "确认删除",
+    message: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Filled.DeleteForever,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(28.dp)
+            )
+        },
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm()
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("删除", color = MaterialTheme.colorScheme.onError)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }

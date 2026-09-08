@@ -187,12 +187,16 @@ fun FileListItem(
             val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
             val dateStr = fmt.format(Date(entry.lastModified))
 
-            val timeInfo = if (visualType == VisualType.VIDEO && videoDurationMs != null && videoDurationMs > 0L) {
-                if (videoPositionMs != null && videoPositionMs > 1000L) {
-                    "${formatDuration(videoPositionMs)} / ${formatDuration(videoDurationMs)}"
-                } else {
-                    formatDuration(videoDurationMs)
-                }
+            val timeInfo = if (visualType == VisualType.VIDEO) {
+                if (videoDurationMs != null && videoDurationMs > 0L) {
+                    if (videoPositionMs != null && videoPositionMs > 1000L) {
+                        "${formatDuration(videoPositionMs)} / ${formatDuration(videoDurationMs)}"
+                    } else {
+                        formatDuration(videoDurationMs)
+                    }
+                } else if (videoPositionMs != null && videoPositionMs > 1000L) {
+                    formatDuration(videoPositionMs)
+                } else null
             } else null
 
             Row(
@@ -215,22 +219,6 @@ fun FileListItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-
-                // 观看进度独立微胶囊 Badge
-                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                        modifier = Modifier.padding(start = 2.dp)
-                    ) {
-                        Text(
-                            text = "已看 ${(videoProgress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                }
             }
         }
 
