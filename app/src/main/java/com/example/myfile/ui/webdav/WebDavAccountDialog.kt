@@ -32,24 +32,48 @@ fun WebDavAccountDialog(
         title = { Text(if (initial == null) "添加账户" else "编辑账户") },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") }, singleLine = true)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.replace("\r", "").replace("\n", "") },
+                    label = { Text("名称") },
+                    singleLine = true,
+                    maxLines = 1
+                )
                 OutlinedTextField(
                     value = url,
-                    onValueChange = { url = it; testResult = null },
+                    onValueChange = {
+                        // 强制单行：自动去掉所有换行符和回车符，防止多行隐藏
+                        url = it.replace("\r", "").replace("\n", "").replace("\t", "")
+                        testResult = null
+                    },
                     label = { Text("地址") },
                     placeholder = { Text("http://192.168.1.100:5005/video") },
                     singleLine = true,
+                    maxLines = 1,
                     supportingText = {
                         Text("群晖需带共享文件夹名，例如 http://域名:5005/video", style = MaterialTheme.typography.bodySmall)
                     }
                 )
-                OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("用户名") }, singleLine = true)
-                OutlinedTextField(value = pass, onValueChange = { pass = it }, label = { Text("密码") }, singleLine = true)
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it.replace("\r", "").replace("\n", "") },
+                    label = { Text("用户名") },
+                    singleLine = true,
+                    maxLines = 1
+                )
+                OutlinedTextField(
+                    value = pass,
+                    onValueChange = { pass = it.replace("\r", "").replace("\n", "") },
+                    label = { Text("密码") },
+                    singleLine = true,
+                    maxLines = 1
+                )
                 OutlinedTextField(
                     value = extraPorts,
-                    onValueChange = { extraPorts = it },
+                    onValueChange = { extraPorts = it.replace("\r", "").replace("\n", "") },
                     label = { Text("备用端口（逗号分隔，如 24438,24439）") },
                     singleLine = true,
+                    maxLines = 1,
                     supportingText = {
                         Text("多个打洞端口轮换下载，绕过运营商流量额度限速", style = MaterialTheme.typography.bodySmall)
                     }

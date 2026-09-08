@@ -46,15 +46,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
 
     // 面包屑：/a/b/c -> [root, a, b, c]
     val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
-    // 当前目录名（本层，不显示完整路径）
-    val currentDirName = crumbs.lastOrNull()?.name ?: "根目录"
+    // 顶部显示多级目录路径（对齐本地浏览规范）
+    val displayPath = if (state.currentPath.isEmpty() || state.currentPath == "/") "/" else state.currentPath
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(currentDirName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(displayPath, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             state.currentAccount?.name ?: "",
                             style = MaterialTheme.typography.labelSmall,

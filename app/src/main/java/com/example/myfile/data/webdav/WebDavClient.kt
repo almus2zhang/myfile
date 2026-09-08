@@ -358,17 +358,48 @@ class WebDavClient(
                         "prop" -> inProp = false
                         "response" -> {
                             inResponse = false
-                            // 跳过目录自身（href 等于请求路径）
                             val href = currentHref ?: ""
                             val decoded = java.net.URLDecoder.decode(href, "UTF-8")
-                            val reqNormalized = requestPath.trimEnd('/')
-                            val hrefNormalized = decoded.trimEnd('/')
-                            if (!hrefNormalized.equals(reqNormalized, ignoreCase = true)) {
-                                val display = if (name.isNotBlank()) name else decoded.substringAfterLast('/').ifEmpty { decoded }
+                            val baseUriPath = try {
+                                java.net.URI(baseUrl).path?.trimEnd('/') ?: ""
+                            } catch (e: Exception) { "" }
+
+                            // 提取纯路径（去除 http(s)://host:port 前缀）
+                            val decodedPath = if (decoded.startsWith("http://", ignoreCase = true) ||
+                                decoded.startsWith("https://", ignoreCase = true)
+                            ) {
+                                try { java.net.URI(decoded).path ?: decoded } catch (e: Exception) { decoded }
+                            } else {
+                                decoded
+                            }
+                            val cleanPath = decodedPath.trimEnd('/')
+
+                            // 相对账户 baseUrl 的路径
+                            val pathInAccount = if (baseUriPath.isNotEmpty() && cleanPath.startsWith(baseUriPath)) {
+                                cleanPath.removePrefix(baseUriPath).ifEmpty { "/" }
+                            } else {
+                                cleanPath.ifEmpty { "/" }
+                            }
+                            val entryPath = if (pathInAccount.startsWith("/")) pathInAccount else "/$pathInAccount"
+
+                            // 规范化请求路径对比，跳过目录自身
+                            val reqNorm = if (requestPath.trimEnd('/').startsWith("/")) requestPath.trimEnd('/') else "/${requestPath.trimEnd('/')}"
+                            val reqNormClean = if (reqNorm.isEmpty()) "/" else reqNorm
+                            val isSelf = entryPath.equals(reqNormClean, ignoreCase = true) ||
+                                cleanPath.equals(reqNormClean, ignoreCase = true) ||
+                                (baseUriPath.isNotEmpty() && cleanPath.equals(baseUriPath, ignoreCase = true) && reqNormClean == "/")
+
+                            if (!isSelf) {
+                                val folderOrFileName = cleanPath.substringAfterLast('/').ifEmpty { cleanPath }
+                                val displayName = if (name.isNotBlank() && !name.contains('/')) {
+                                    name.trimEnd('/')
+                                } else {
+                                    folderOrFileName
+                                }
                                 result.add(
                                     FileEntry(
-                                        name = display,
-                                        path = decoded,
+                                        name = displayName,
+                                        path = entryPath,
                                         isDirectory = isDir,
                                         size = size,
                                         lastModified = lastMod,
