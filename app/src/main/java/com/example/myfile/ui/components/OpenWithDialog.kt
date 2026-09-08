@@ -25,7 +25,8 @@ fun OpenWithDialog(
     title: String,
     candidates: List<AppCandidate>,
     onDismiss: () -> Unit,
-    onSelect: (AppCandidate, always: Boolean) -> Unit
+    onSelect: (AppCandidate, always: Boolean) -> Unit,
+    onSystemChooser: (() -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -78,7 +79,13 @@ fun OpenWithDialog(
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (onSystemChooser != null) {
+                TextButton(onClick = onSystemChooser) {
+                    Text("系统选择器…")
+                }
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         }

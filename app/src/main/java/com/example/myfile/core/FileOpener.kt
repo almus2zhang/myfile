@@ -96,6 +96,10 @@ object FileOpener {
     fun openWith(context: Context, intent: Intent, candidate: AppCandidate): Boolean =
         AppResolver.openWith(context, intent, candidate)
 
+    /** 调用 Android 系统打开方式选择器 */
+    fun openWithSystemChooser(context: Context, intent: Intent, title: String = "打开为") =
+        AppResolver.openWithSystemChooser(context, intent, title)
+
     /**
      * 打开远程 WebDAV 文件（非视频）：流式下载到 cache，返回本地文件。
      * 返回 null 表示下载失败。

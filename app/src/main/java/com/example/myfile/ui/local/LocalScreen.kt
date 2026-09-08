@@ -184,6 +184,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
 
     // 「打开方式」选择对话框
     openWithRequest?.let { req ->
+        val context = androidx.compose.ui.platform.LocalContext.current
         OpenWithDialog(
             title = "打开 \"${req.entry.name}\"",
             candidates = req.candidates,
@@ -199,6 +200,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         candidate = candidate
                     )
                 }
+                openWithRequest = null
+            },
+            onSystemChooser = {
+                FileOpener.openWithSystemChooser(context, req.intent)
                 openWithRequest = null
             }
         )
