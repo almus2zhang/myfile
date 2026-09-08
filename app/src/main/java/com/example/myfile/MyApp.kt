@@ -1,0 +1,104 @@
+package com.example.myfile
+
+import android.app.Application
+import com.example.myfile.core.download.DownloadManager
+import com.example.myfile.data.db.AppDatabase
+import com.example.myfile.data.local.LocalFileRepository
+import com.example.myfile.data.prefs.DefaultAppStore
+import com.example.myfile.data.prefs.DownloadSettings
+import com.example.myfile.data.prefs.SettingsStore
+import com.example.myfile.data.webdav.AccountStore
+import com.example.myfile.data.webdav.WebDavClient
+import com.example.myfile.data.webdav.WebDavRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import java.util.concurrent.TimeUnit
+
+class MyApp : Application() {
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    lateinit var okHttpClient: OkHttpClient
+        private set
+
+    lateinit var db: AppDatabase
+        private set
+
+    lateinit var localRepo: LocalFileRepository
+        private set
+
+    lateinit var accountStore: AccountStore
+        private set
+
+    lateinit var settingsStore: SettingsStore
+        private set
+
+    lateinit var defaultAppStore: DefaultAppStore
+        private set
+
+    lateinit var webDavRepository: WebDavRepository
+        private set
+
+    lateinit var downloadManager: DownloadManager
+        private set
+
+    private val _currentSettings = MutableStateFlow(DownloadSettings())
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+
+        okHttpClient = OkHttpClient.Builder()
+            // 短连接池：空闲 3 秒即关闭，避免长连接被运营商持续限速。
+            // 每次下载尽量用新连接（新连接可能"抽到"未限速的路径），
+            // 匹配其他客户端"随机时快时慢"的行为。
+            .connectionPool(ConnectionPool(0, 3, TimeUnit.SECONDS))
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            // 强制 HTTP/1.1：Apache mod_dav + 部分 WebDAV 服务端在 HTTP/2 下
+            // PROPFIND/OPTIONS 行为异常（会返回 404），与 RaiDrive/rclone 行为不一致。
+            .protocols(listOf(Protocol.HTTP_1_1))
+            // 关键：禁用 OkHttp 自动重定向跟随。PROPFIND 重定向时 OkHttp 会把方法
+            // 改成 GET，导致服务端把 PROPFIND 当普通 GET 处理返回 404。
+            // 我们手动处理重定向：如果服务端 PROPFIND 返回 301/302，按 Location 重发。
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+
+        db = AppDatabase.get(this)
+        localRepo = LocalFileRepository(this)
+        accountStore = AccountStore(this)
+        settingsStore = SettingsStore(this)
+        defaultAppStore = DefaultAppStore(this)
+
+        appScope.launch {
+            settingsStore.settings.collect { _currentSettings.value = it }
+        }
+
+        webDavRepository = WebDavRepository { account ->
+            WebDavClient(okHttpClient, account.url, account.username, account.password)
+        }
+
+        downloadManager = DownloadManager(
+            context = this,
+            db = db,
+            clientProvider = { account ->
+                WebDavClient(okHttpClient, account.url, account.username, account.password)
+            },
+            settingsProvider = { _currentSettings.value }
+        )
+    }
+
+    companion object {
+        lateinit var instance: MyApp
+            private set
+    }
+}

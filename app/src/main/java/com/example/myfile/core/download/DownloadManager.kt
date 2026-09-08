@@ -1,0 +1,292 @@
+package com.example.myfile.core.download
+
+import android.content.Context
+import android.util.Log
+import com.example.myfile.core.DownloadLog
+import com.example.myfile.data.db.AppDatabase
+import com.example.myfile.data.db.ChunkRecordDao
+import com.example.myfile.data.db.DownloadTaskDao
+import com.example.myfile.data.db.entity.DownloadTaskEntity
+import com.example.myfile.data.prefs.DownloadSettings
+import com.example.myfile.data.webdav.WebDavClient
+import com.example.myfile.model.ChunkStatusUi
+import com.example.myfile.model.ChunkUi
+import com.example.myfile.model.TransferStatus
+import com.example.myfile.model.TransferTask
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.RandomAccessFile
+
+/**
+ * 下载任务生命周期管理：创建任务、启动/暂停/取消、统一进度流
+ */
+class DownloadManager(
+    private val context: Context,
+    private val db: AppDatabase,
+    private val clientProvider: (com.example.myfile.model.WebDavAccount) -> WebDavClient,
+    private val settingsProvider: () -> DownloadSettings
+) {
+    companion object { private const val TAG = "DownloadManager" }
+
+    private val taskDao: DownloadTaskDao = db.downloadTaskDao()
+    private val chunkDao: ChunkRecordDao = db.chunkRecordDao()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val runningTasks = mutableMapOf<Long, kotlinx.coroutines.Job>()
+    private val mutex = Mutex()
+
+    /** UI 层订阅的任务流 */
+    val tasks: StateFlow<List<TransferTask>> =
+        combine(taskDao.observeAll(), settingsProvider().let { MutableStateFlow(it) }) { entities, _ ->
+            entities.map { it.toUi() }
+        }.let { combined ->
+            kotlinx.coroutines.flow.MutableStateFlow<List<TransferTask>>(emptyList()).also { state ->
+                scope.launch {
+                    combined.collect { state.value = it }
+                }
+            }
+        }
+
+    /** 单任务分片流 */
+    fun observeChunks(taskId: Long) = chunkDao.observeChunks(taskId).map { list ->
+        list.map {
+            ChunkUi(
+                index = it.index,
+                status = runCatching { ChunkStatusUi.valueOf(it.status) }.getOrDefault(ChunkStatusUi.PENDING),
+                startOffset = it.startOffset,
+                endOffset = it.endOffset,
+                downloaded = it.downloadedBytes
+            )
+        }
+    }
+
+    /** 视频扩展名集合：这些类型运营商不按 Content-Type 限速，无需改名 */
+    private val videoExtensions = setOf(
+        "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "ts", "m4v",
+        "mpg", "mpeg", "3gp", "rmvb", "rm", "vob", "m2ts"
+    )
+
+    /** 创建并启动下载任务 */
+    suspend fun startDownload(
+        account: com.example.myfile.model.WebDavAccount,
+        remotePath: String,
+        fileName: String,
+        localDir: File,
+        knownSize: Long = -1L
+    ): Long = withContext(Dispatchers.IO) {
+        val client = clientProvider(account)
+        // 优先用已知大小（列目录时 PROPFIND Depth:1 已拿到 getcontentlength），否则回退 HEAD/PROPFIND
+        var totalBytes = knownSize
+        if (totalBytes <= 0) {
+            totalBytes = client.getSize(remotePath)
+        }
+        require(totalBytes > 0) { "cannot get file size (knownSize=$knownSize)" }
+
+        val localFile = File(localDir, fileName)
+
+        // 改名下载（伪装视频）：把非视频文件临时改成 .avi 后缀（服务器端 MOVE），
+        // 绕过运营商按 Content-Type 的限速，下载完成后改回原名。
+        // 仅影响远程路径，本地文件名保持原名不变。
+        val settings = settingsProvider()
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        val shouldRename = settings.renameToVideoExt &&
+            ext.isNotEmpty() && ext !in videoExtensions
+        // 实际下载用的远程路径（可能被改名为 .avi）
+        val downloadPath: String
+        if (shouldRename) {
+            val tmpPath = renameToVideo(remotePath)
+            downloadPath = if (client.move(remotePath, tmpPath)) {
+                DownloadLog.log(TAG, "rename download: $remotePath -> $tmpPath")
+                tmpPath
+            } else {
+                DownloadLog.log(TAG, "rename download MOVE failed, fallback original: $remotePath")
+                remotePath
+            }
+        } else {
+            downloadPath = remotePath
+        }
+
+        val taskId = taskDao.insert(
+            DownloadTaskEntity(
+                fileName = fileName,
+                remoteUrl = remotePath,
+                localPath = localFile.absolutePath,
+                totalBytes = totalBytes,
+                downloadedBytes = 0,
+                status = TransferStatus.QUEUED.name,
+                isUpload = false,
+                accountId = account.id,
+                authHeader = client.authHeader()
+            )
+        )
+        launchEngine(taskId, account, downloadPath, localFile, totalBytes) {
+            // 下载结束后（无论成败），把服务器端文件改回原名
+            if (shouldRename && downloadPath != remotePath) {
+                try {
+                    client.move(downloadPath, remotePath)
+                    DownloadLog.log(TAG, "rename back: $downloadPath -> $remotePath")
+                } catch (e: Exception) {
+                    DownloadLog.log(TAG, "rename back failed: ${e.message}")
+                }
+            }
+        }
+        return@withContext taskId
+    }
+
+    /** 生成一个 .avi 后缀的临时远程路径（同目录、唯一名，避免覆盖已有文件） */
+    private fun renameToVideo(remotePath: String): String {
+        val dir = remotePath.substringBeforeLast('/', "")
+        val name = remotePath.substringAfterLast('/')
+        // 去掉原扩展名后加 .avi，并加时间戳避免重名
+        val base = name.substringBeforeLast('.', name)
+        val ts = System.currentTimeMillis() % 100000
+        return if (dir.isEmpty()) "$base.mf$ts.avi" else "$dir/$base.mf$ts.avi"
+    }
+
+    private fun launchEngine(
+        taskId: Long,
+        account: com.example.myfile.model.WebDavAccount,
+        remotePath: String,
+        localFile: File,
+        totalBytes: Long,
+        onFinished: (() -> Unit)? = null
+    ) {
+        val job = scope.launch {
+            try {
+                taskDao.updateStatus(taskId, TransferStatus.DOWNLOADING.name, null)
+                val settings = settingsProvider()
+                val config = DownloadConfig(
+                    chunkSize = settings.chunkSize,
+                    maxConnections = settings.maxConnections,
+                    maxRetries = settings.maxRetries,
+                    connectTimeoutSec = settings.connectTimeoutSec,
+                    readTimeoutSec = settings.readTimeoutSec,
+                    singleConnectionMode = settings.singleConnectionMode,
+                    streamPulseMode = settings.streamPulseMode
+                )
+                // 构建多个 client（主地址 + 备用端口），用于轮换绕过限速
+                val clients = account.allUrls().map { url ->
+                    clientProvider(account.copy(url = url))
+                }
+                DownloadLog.log(TAG, "download with ${clients.size} clients (ports: ${clients.map { portOfUrl(it) }}) mode=${if (config.singleConnectionMode) "single" else "parallel"}")
+                val client = clients.first()
+
+                if (config.singleConnectionMode) {
+                    // 单连接完整 GET（不用 Range），模拟 CX 文件浏览器的行为
+                    DownloadLog.log(TAG, "using single connection full GET mode")
+                    fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
+                    taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                } else {
+                    val engine = ParallelDownloadEngine(clients, config, chunkDao)
+                    val raf = RandomAccessFile(localFile, "rw").apply { setLength(totalBytes) }
+                    raf.use {
+                        val result = engine.startDownload(remotePath, it, taskId, totalBytes) { downloaded, _ ->
+                            scope.launch { taskDao.updateProgress(taskId, downloaded, TransferStatus.DOWNLOADING.name) }
+                        }
+                        when (result) {
+                            DownloadResult.Success -> taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                            DownloadResult.UnsupportedRange -> {
+                                // 回退单连接顺序下载
+                                fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
+                                taskDao.updateStatus(taskId, TransferStatus.COMPLETED.name, null)
+                            }
+                            DownloadResult.Canceled -> taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
+                            is DownloadResult.Failed -> taskDao.updateStatus(taskId, TransferStatus.FAILED.name, result.message)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "download failed", e)
+                taskDao.updateStatus(taskId, TransferStatus.FAILED.name, e.message)
+            } finally {
+                try { onFinished?.invoke() } catch (e: Exception) {
+                    DownloadLog.log(TAG, "onFinished error: ${e.message}")
+                }
+                mutex.withLock { runningTasks.remove(taskId) }
+            }
+        }
+        scope.launch { mutex.withLock { runningTasks[taskId] = job } }
+    }
+
+    /** 服务器不支持 Range 时的单连接回退 */
+    private suspend fun fallbackSingle(
+        client: WebDavClient,
+        path: String,
+        localFile: File,
+        taskId: Long,
+        totalBytes: Long
+    ) {
+        val resp = client.download(path)
+        resp.use { r ->
+            r.body?.byteStream()?.use { input ->
+                localFile.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var total = 0L
+                    var lastReport = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                        total += n
+                        if (total - lastReport > 512 * 1024) {
+                            taskDao.updateProgress(taskId, total, TransferStatus.DOWNLOADING.name)
+                            lastReport = total
+                        }
+                    }
+                    taskDao.updateProgress(taskId, total, TransferStatus.COMPLETED.name)
+                }
+            }
+        }
+    }
+
+    suspend fun pause(taskId: Long) {
+        runningTasks[taskId]?.cancel()
+        mutex.withLock { runningTasks.remove(taskId) }
+        taskDao.updateStatus(taskId, TransferStatus.PAUSED.name, null)
+    }
+
+    suspend fun resume(taskId: Long, account: com.example.myfile.model.WebDavAccount) {
+        val task = taskDao.getById(taskId) ?: return
+        if (task.status == TransferStatus.COMPLETED.name) return
+        launchEngine(taskId, account, task.remoteUrl, File(task.localPath), task.totalBytes)
+    }
+
+    suspend fun cancel(taskId: Long) {
+        runningTasks[taskId]?.cancel()
+        mutex.withLock { runningTasks.remove(taskId) }
+        taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
+    }
+
+    suspend fun delete(taskId: Long) {
+        cancel(taskId)
+        chunkDao.deleteByTask(taskId)
+        taskDao.delete(taskId)
+    }
+
+    private fun portOfUrl(c: WebDavClient): String = try {
+        java.net.URI(c.baseUrlString()).port.toString()
+    } catch (e: Exception) { "?" }
+
+    private fun DownloadTaskEntity.toUi(): TransferTask = TransferTask(
+        id = id,
+        fileName = fileName,
+        remoteUrl = remoteUrl,
+        localPath = localPath,
+        totalBytes = totalBytes,
+        downloadedBytes = downloadedBytes,
+        speedBytesPerSec = 0,
+        status = runCatching { TransferStatus.valueOf(status) }.getOrDefault(TransferStatus.QUEUED),
+        chunks = emptyList(),
+        isUpload = isUpload,
+        errorMessage = errorMessage
+    )
+}

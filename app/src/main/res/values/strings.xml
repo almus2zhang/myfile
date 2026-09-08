@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">myfile</string>
+    <string name="tab_local">本地</string>
+    <string name="tab_webdav">WebDAV</string>
+    <string name="tab_transfer">传输</string>
+    <string name="tab_settings">设置</string>
+    <string name="action_new_folder">新建文件夹</string>
+    <string name="action_delete">删除</string>
+    <string name="action_rename">重命名</string>
+    <string name="action_copy">复制</string>
+    <string name="action_move">移动</string>
+    <string name="action_paste">粘贴</string>
+    <string name="action_download">下载</string>
+    <string name="action_upload">上传</string>
+    <string name="action_pause">暂停</string>
+    <string name="action_resume">继续</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_open">打开</string>
+    <string name="action_add_account">添加账户</string>
+    <string name="action_search">搜索</string>
+    <string name="action_sort">排序</string>
+    <string name="download_channel_name">下载服务</string>
+    <string name="download_channel_desc">文件下载进度通知</string>
+    <string name="settings_chunk_size">分片大小</string>
+    <string name="settings_connections">并发连接数</string>
+    <string name="settings_retries">重试次数</string>
+    <string name="settings_connect_timeout">连接超时(秒)</string>
+    <string name="settings_read_timeout">读取超时(秒)</string>
+    <string name="settings_hint">分片越小并发越细但开销增大；分片越大单流利用率高但并发度降低。STUN 环境建议从 4MB / 4连接开始调优。</string>
+</resources>
