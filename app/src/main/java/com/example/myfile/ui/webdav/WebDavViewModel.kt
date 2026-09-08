@@ -93,6 +93,14 @@ class WebDavViewModel : ViewModel() {
         }
     }
 
+    private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
+
+    fun saveScrollPosition(path: String, index: Int, offset: Int) {
+        scrollPositions[path] = index to offset
+    }
+
+    fun getScrollPosition(path: String): Pair<Int, Int>? = scrollPositions[path]
+
     fun goUp() {
         val path = _state.value.currentPath.trimEnd('/')
         if (path.isEmpty() || path == "/") return

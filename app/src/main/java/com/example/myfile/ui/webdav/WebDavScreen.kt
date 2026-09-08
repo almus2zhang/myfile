@@ -12,6 +12,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -79,6 +82,34 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         }
     }
 
+    val listState = rememberLazyListState()
+    var pendingScrollRatio by remember { mutableStateOf<Pair<Float, Int>?>(null) }
+
+    LaunchedEffect(state.sortedFiles) {
+        pendingScrollRatio?.let { (ratio, offset) ->
+            pendingScrollRatio = null
+            val newTotal = state.sortedFiles.size
+            if (newTotal > 0) {
+                val targetIndex = (ratio * newTotal).toInt().coerceIn(0, newTotal - 1)
+                listState.scrollToItem(targetIndex, offset)
+            }
+        }
+    }
+
+    LaunchedEffect(state.currentPath) {
+        snapshotFlow { state.sortedFiles }
+            .filter { it.isNotEmpty() }
+            .first()
+        val saved = vm.getScrollPosition(state.currentPath)
+        if (saved != null) {
+            val (idx, off) = saved
+            val target = idx.coerceIn(0, (state.sortedFiles.size - 1).coerceAtLeast(0))
+            listState.scrollToItem(target, off)
+        } else {
+            listState.scrollToItem(0, 0)
+        }
+    }
+
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
 
@@ -137,6 +168,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         if (state.multiSelectMode) {
             vm.clearSelection()
         } else {
+            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
             vm.goUp()
         }
     }
@@ -151,29 +183,32 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             TopAppBar(
                 title = {
                     Column {
-                        Text(displayPath, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val acc = state.currentAccount
-                        val subtitle = if (acc != null) {
-                            if (acc.isDynamic && acc.resolvedUrl.isNotBlank()) {
-                                "${acc.name} [动态: ${acc.connectionUrl()}]"
-                            } else {
-                                acc.name
-                            }
-                        } else ""
-                        if (subtitle.isNotEmpty()) {
-                            Text(
-                                subtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                        Text(
+                            text = displayPath,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val subtitle = when {
+                            state.currentAccount == null -> "未选择账户"
+                            state.currentAccount!!.isDynamic && state.currentAccount!!.resolvedUrl.isNotBlank() ->
+                                "${state.currentAccount!!.name}  ·  动态连接: ${state.currentAccount!!.resolvedUrl}"
+                            else -> state.currentAccount!!.name
                         }
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 },
                 navigationIcon = {
                     if (state.currentPath != "/") {
-                        IconButton(onClick = { vm.goUp() }) {
+                        IconButton(onClick = {
+                            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                            vm.goUp()
+                        }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "上级")
                         }
                     }
@@ -208,6 +243,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
                                     } else null,
                                     onClick = {
+                                        val curIndex = listState.firstVisibleItemIndex
+                                        val curOffset = listState.firstVisibleItemScrollOffset
+                                        val curTotal = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
+                                        pendingScrollRatio = (curIndex.toFloat() / curTotal) to curOffset
                                         showSortMenu = false
                                         vm.setSort(mode, asc)
                                     }
@@ -375,7 +414,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             modifier = Modifier
-                                .clickable { vm.navigateTo(crumb.path) }
+                                .clickable {
+                                    vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                                    vm.navigateTo(crumb.path)
+                                }
                                 .padding(horizontal = 6.dp, vertical = 4.dp)
                         )
                     }
@@ -424,7 +466,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             Text("此文件夹为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                             items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
                         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                         val fullUrl = base + p
@@ -437,11 +479,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             scope.launch {
                                 val appCtx = context.applicationContext
                                 var intent = if (FileOpener.isVideo(entry.name)) {
+                                    val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
                                     FileOpener.buildVideoStreamIntent(
                                         client = com.example.myfile.MyApp.instance.okHttpClient,
                                         account = acc,
                                         remotePath = entry.path,
-                                        fileName = entry.name
+                                        fileName = entry.name,
+                                        fakeAvi = fakeAvi
                                     )
                                 } else {
                                     val tmp = FileOpener.downloadToCache(
@@ -534,6 +578,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 if (state.multiSelectMode) {
                                     vm.toggleSelect(entry.path)
                                 } else if (entry.isDirectory) {
+                                    vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
                                     vm.open(entry)
                                 } else if (category == "image") {
                                     val idx = imageEntries.indexOfFirst { it.path == entry.path }

@@ -60,6 +60,29 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 }
             }
 
+            // 视频播放伪装 .avi 后缀开关
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("视频播放伪装 .avi 后缀", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "播放视频时将本地流代理链接与打开方式伪装为 .avi 扩展名，具体视频格式交由播放器根据流数据自行解析",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = s.streamFakeAvi,
+                        onCheckedChange = { vm.updateStreamFakeAvi(it) }
+                    )
+                }
+            }
+
             // 分片大小
             Section(title = stringResource(R.string.settings_chunk_size)) {
                 Row(

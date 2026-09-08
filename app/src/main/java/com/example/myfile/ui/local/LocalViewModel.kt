@@ -45,6 +45,14 @@ class LocalViewModel : ViewModel() {
 
     init { refresh() }
 
+    private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
+
+    fun saveScrollPosition(path: String, index: Int, offset: Int) {
+        scrollPositions[path] = index to offset
+    }
+
+    fun getScrollPosition(path: String): Pair<Int, Int>? = scrollPositions[path]
+
     fun setSort(mode: com.example.myfile.ui.webdav.SortMode, asc: Boolean) {
         _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
     }

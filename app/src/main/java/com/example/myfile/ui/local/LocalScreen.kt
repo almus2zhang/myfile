@@ -6,6 +6,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -75,6 +78,34 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
         }
     }
 
+    val listState = rememberLazyListState()
+    var pendingScrollRatio by remember { mutableStateOf<Pair<Float, Int>?>(null) }
+
+    LaunchedEffect(state.sortedFiles) {
+        pendingScrollRatio?.let { (ratio, offset) ->
+            pendingScrollRatio = null
+            val newTotal = state.sortedFiles.size
+            if (newTotal > 0) {
+                val targetIndex = (ratio * newTotal).toInt().coerceIn(0, newTotal - 1)
+                listState.scrollToItem(targetIndex, offset)
+            }
+        }
+    }
+
+    LaunchedEffect(state.currentDir) {
+        snapshotFlow { state.sortedFiles }
+            .filter { it.isNotEmpty() }
+            .first()
+        val saved = vm.getScrollPosition(state.currentDir.absolutePath)
+        if (saved != null) {
+            val (idx, off) = saved
+            val target = idx.coerceIn(0, (state.sortedFiles.size - 1).coerceAtLeast(0))
+            listState.scrollToItem(target, off)
+        } else {
+            listState.scrollToItem(0, 0)
+        }
+    }
+
     val progressList by MyApp.instance.db.videoProgressDao().observeAll().collectAsState(initial = emptyList())
     val progressMap = remember(progressList) { progressList.associateBy { it.uriKey } }
 
@@ -129,6 +160,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
         if (state.multiSelectMode) {
             vm.clearSelection()
         } else {
+            vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
             vm.goUp()
         }
     }
@@ -151,7 +183,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 },
                 navigationIcon = {
                     if (!isRoot) {
-                        IconButton(onClick = { vm.goUp() }) {
+                        IconButton(onClick = {
+                            vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                            vm.goUp()
+                        }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                         }
                     }
@@ -188,6 +223,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                         { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
                                     } else null,
                                     onClick = {
+                                        val curIndex = listState.firstVisibleItemIndex
+                                        val curOffset = listState.firstVisibleItemScrollOffset
+                                        val curTotal = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
+                                        pendingScrollRatio = (curIndex.toFloat() / curTotal) to curOffset
                                         showSortMenu = false
                                         vm.setSort(mode, asc)
                                     }
@@ -199,7 +238,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         Icon(Icons.Filled.Refresh, "刷新")
                     }
                     if (!isRoot) {
-                        IconButton(onClick = { vm.goUp() }) {
+                        IconButton(onClick = {
+                            vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                            vm.goUp()
+                        }) {
                             Icon(Icons.Filled.ArrowUpward, "上级")
                         }
                     }
@@ -259,6 +301,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 .nestedScroll(pullRefreshState.nestedScrollConnection)
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
@@ -340,6 +383,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         if (state.multiSelectMode) {
                             vm.toggleSelect(entry.path)
                         } else if (entry.isDirectory) {
+                            vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
                             vm.open(entry)
                         } else if (category == "image") {
                             val idx = imageEntries.indexOfFirst { it.path == entry.path }

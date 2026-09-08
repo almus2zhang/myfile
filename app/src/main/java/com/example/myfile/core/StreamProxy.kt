@@ -44,7 +44,8 @@ object StreamProxy {
         val client: OkHttpClient,
         var account: WebDavAccount,
         val remotePath: String,
-        val rawKey: String
+        val rawKey: String,
+        val fakeAvi: Boolean = false
     ) {
         val username get() = account.username
         val password get() = account.password
@@ -150,7 +151,7 @@ object StreamProxy {
 
                     // 透传关键头
                     listOf("Content-Length", "Content-Range", "Content-Type", "Accept-Ranges").forEach { h ->
-                        val v = respHeaders[h]
+                        val v = if (h == "Content-Type" && entry.fakeAvi) "video/x-msvideo" else respHeaders[h]
                         if (v != null) output.write("$h: $v\r\n".toByteArray())
                     }
                     output.write("Connection: close\r\n".toByteArray())
@@ -243,7 +244,9 @@ object StreamProxy {
     fun register(
         client: OkHttpClient,
         account: WebDavAccount,
-        remotePath: String
+        remotePath: String,
+        displayName: String? = null,
+        fakeAvi: Boolean = false
     ): String {
         val p = ensureStarted()
         val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
@@ -256,10 +259,12 @@ object StreamProxy {
             client = client,
             account = account,
             remotePath = path,
-            rawKey = rawKey
+            rawKey = rawKey,
+            fakeAvi = fakeAvi
         )
 
-        val fileName = path.substringAfterLast('/').ifBlank { "video.mp4" }
+        val baseName = path.substringAfterLast('/').ifBlank { "video.mp4" }
+        val fileName = displayName?.ifBlank { null } ?: baseName
         val encodedName = java.net.URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")
         val streamUrl = "http://127.0.0.1:$p/$md5/$encodedName"
 

@@ -21,7 +21,8 @@ data class DownloadSettings(
     val readTimeoutSec: Long = 60,
     val singleConnectionMode: Boolean = false,  // true = 单连接完整 GET（不用 Range）
     val streamPulseMode: Boolean = false,       // true = 流式节奏（边下边停，模拟边播边拉）
-    val renameToVideoExt: Boolean = true        // true = 下载前临时把文件改成 .avi 后缀绕过 Content-Type 限速，下完改回
+    val renameToVideoExt: Boolean = true,       // true = 下载前临时把文件改成 .avi 后缀绕过 Content-Type 限速，下完改回
+    val streamFakeAvi: Boolean = false          // true = 播放视频时伪装为 .avi 后缀
 )
 
 class SettingsStore(private val context: Context) {
@@ -35,6 +36,7 @@ class SettingsStore(private val context: Context) {
         val SINGLE_CONNECTION = booleanPreferencesKey("single_connection")
         val STREAM_PULSE = booleanPreferencesKey("stream_pulse")
         val RENAME_TO_VIDEO_EXT = booleanPreferencesKey("rename_to_video_ext")
+        val STREAM_FAKE_AVI = booleanPreferencesKey("stream_fake_avi")
     }
 
     val settings: Flow<DownloadSettings> = context.settingsStore.data.map { p ->
@@ -46,7 +48,8 @@ class SettingsStore(private val context: Context) {
             readTimeoutSec = p[Keys.READ_TIMEOUT] ?: 60,
             singleConnectionMode = p[Keys.SINGLE_CONNECTION] ?: false,
             streamPulseMode = p[Keys.STREAM_PULSE] ?: false,
-            renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true
+            renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true,
+            streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false
         )
     }
 
@@ -60,7 +63,8 @@ class SettingsStore(private val context: Context) {
                 readTimeoutSec = p[Keys.READ_TIMEOUT] ?: 60,
                 singleConnectionMode = p[Keys.SINGLE_CONNECTION] ?: false,
                 streamPulseMode = p[Keys.STREAM_PULSE] ?: false,
-                renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true
+                renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true,
+                streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false
             )
             val updated = transform(current)
             p[Keys.CHUNK_SIZE] = updated.chunkSize
@@ -71,6 +75,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.SINGLE_CONNECTION] = updated.singleConnectionMode
             p[Keys.STREAM_PULSE] = updated.streamPulseMode
             p[Keys.RENAME_TO_VIDEO_EXT] = updated.renameToVideoExt
+            p[Keys.STREAM_FAKE_AVI] = updated.streamFakeAvi
         }
     }
 }

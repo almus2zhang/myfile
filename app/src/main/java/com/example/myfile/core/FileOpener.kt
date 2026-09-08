@@ -45,11 +45,18 @@ object FileOpener {
         client: OkHttpClient,
         account: com.example.myfile.model.WebDavAccount,
         remotePath: String,
-        fileName: String
+        fileName: String,
+        fakeAvi: Boolean = false
     ): Intent? {
         return try {
-            val localUrl = StreamProxy.register(client, account, remotePath)
-            val mime = guessMime(fileName)
+            val displayName = if (fakeAvi) {
+                val base = fileName.substringBeforeLast('.').ifBlank { "video" }
+                "$base.avi"
+            } else {
+                fileName
+            }
+            val localUrl = StreamProxy.register(client, account, remotePath, displayName, fakeAvi)
+            val mime = if (fakeAvi) "video/*" else guessMime(fileName)
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(Uri.parse(localUrl), mime)
             }

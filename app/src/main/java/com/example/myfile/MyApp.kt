@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
@@ -76,6 +77,7 @@ class MyApp : Application(), ImageLoaderFactory {
         private set
 
     private val _currentSettings = MutableStateFlow(DownloadSettings())
+    val currentSettings: kotlinx.coroutines.flow.StateFlow<DownloadSettings> = _currentSettings.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()

@@ -51,4 +51,8 @@ class SettingsViewModel : ViewModel() {
     fun updateRenameToVideoExt(enabled: Boolean) {
         viewModelScope.launch { store.update { it.copy(renameToVideoExt = enabled) } }
     }
+
+    fun updateStreamFakeAvi(enabled: Boolean) {
+        viewModelScope.launch { store.update { it.copy(streamFakeAvi = enabled) } }
+    }
 }
