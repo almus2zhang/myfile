@@ -130,6 +130,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
 
     // 「打开方式」选择对话框状态
     var openWithRequest by remember { mutableStateOf<OpenWithRequest?>(null) }
+    var showTrafficDebug by remember { mutableStateOf(false) }
+    val activeTransfers by com.example.myfile.core.TrafficMonitor.activeTransfers.collectAsState()
+    val totalSpeed by com.example.myfile.core.TrafficMonitor.totalDownloadSpeed.collectAsState()
     val scope = rememberCoroutineScope()
 
     val externalLauncher = rememberLauncherForActivityResult(
@@ -272,6 +275,17 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     }
                                 )
                             }
+                        }
+                    }
+                    IconButton(onClick = { showTrafficDebug = true }) {
+                        BadgedBox(
+                            badge = {
+                                if (activeTransfers.isNotEmpty()) {
+                                    Badge { Text("${activeTransfers.size}") }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Filled.Speed, "网络传输监控")
                         }
                     }
                     IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, "刷新") }
@@ -418,41 +432,78 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        crumbs.forEachIndexed { index, crumb ->
-                            if (index > 0) {
-                                Text(
-                                    text = "›",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.padding(horizontal = 2.dp)
-                                )
-                            }
-                            val isCurrent = index == crumbs.lastIndex
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        if (!isCurrent) {
-                                            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                                            vm.navigateTo(crumb.path)
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            crumbs.forEachIndexed { index, crumb ->
+                                if (index > 0) {
+                                    Text(
+                                        text = "›",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.padding(horizontal = 2.dp)
+                                    )
+                                }
+                                val isCurrent = index == crumbs.lastIndex
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            if (!isCurrent) {
+                                                vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                                                vm.navigateTo(crumb.path)
+                                            }
                                         }
-                                    }
+                                ) {
+                                    Text(
+                                        text = crumb.name,
+                                        color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // 实时网络速率小徽章（有网速或活跃传输时显示，点击秒开 Debug 监控面板）
+                        if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .padding(start = 6.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { showTrafficDebug = true }
                             ) {
-                                Text(
-                                    text = crumb.name,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Speed,
+                                        contentDescription = "实时网速",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = "${com.example.myfile.ui.components.formatSpeed(totalSpeed)} (${activeTransfers.size})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
                             }
                         }
                     }
@@ -621,6 +672,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             thumbnailUrl = if (!entry.isDirectory) {
                                 if ((category == "image" || category == "apk") && acc != null) {
                                     com.example.myfile.core.WebDavThumbRequest(acc, entry)
+                                } else if (category == "video" && acc != null) {
+                                    if (com.example.myfile.MyApp.instance.currentSettings.value.loadRemoteVideoThumbnails) {
+                                        fullUrl
+                                    } else {
+                                        null
+                                    }
                                 } else {
                                     fullUrl
                                 }
@@ -841,6 +898,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     MyApp.instance.downloadManager.cancel(idToCancel)
                 }
             }
+        )
+    }
+
+    if (showTrafficDebug) {
+        com.example.myfile.ui.components.DebugTrafficDialog(
+            onDismiss = { showTrafficDebug = false }
         )
     }
 }

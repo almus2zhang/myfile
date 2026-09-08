@@ -22,7 +22,8 @@ data class DownloadSettings(
     val singleConnectionMode: Boolean = false,  // true = 单连接完整 GET（不用 Range）
     val streamPulseMode: Boolean = false,       // true = 流式节奏（边下边停，模拟边播边拉）
     val renameToVideoExt: Boolean = true,       // true = 下载前临时把文件改成 .avi 后缀绕过 Content-Type 限速，下完改回
-    val streamFakeAvi: Boolean = false          // true = 播放视频时伪装为 .avi 后缀
+    val streamFakeAvi: Boolean = false,         // true = 播放视频时伪装为 .avi 后缀
+    val loadRemoteVideoThumbnails: Boolean = false // true = 自动加载 WebDAV 远程视频首帧缩略图（耗流量）
 )
 
 class SettingsStore(private val context: Context) {
@@ -37,6 +38,7 @@ class SettingsStore(private val context: Context) {
         val STREAM_PULSE = booleanPreferencesKey("stream_pulse")
         val RENAME_TO_VIDEO_EXT = booleanPreferencesKey("rename_to_video_ext")
         val STREAM_FAKE_AVI = booleanPreferencesKey("stream_fake_avi")
+        val LOAD_REMOTE_VIDEO_THUMBNAILS = booleanPreferencesKey("load_remote_video_thumbnails")
     }
 
     val settings: Flow<DownloadSettings> = context.settingsStore.data.map { p ->
@@ -49,7 +51,8 @@ class SettingsStore(private val context: Context) {
             singleConnectionMode = p[Keys.SINGLE_CONNECTION] ?: false,
             streamPulseMode = p[Keys.STREAM_PULSE] ?: false,
             renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true,
-            streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false
+            streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false,
+            loadRemoteVideoThumbnails = p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] ?: false
         )
     }
 
@@ -64,7 +67,8 @@ class SettingsStore(private val context: Context) {
                 singleConnectionMode = p[Keys.SINGLE_CONNECTION] ?: false,
                 streamPulseMode = p[Keys.STREAM_PULSE] ?: false,
                 renameToVideoExt = p[Keys.RENAME_TO_VIDEO_EXT] ?: true,
-                streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false
+                streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false,
+                loadRemoteVideoThumbnails = p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] ?: false
             )
             val updated = transform(current)
             p[Keys.CHUNK_SIZE] = updated.chunkSize
@@ -76,6 +80,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.STREAM_PULSE] = updated.streamPulseMode
             p[Keys.RENAME_TO_VIDEO_EXT] = updated.renameToVideoExt
             p[Keys.STREAM_FAKE_AVI] = updated.streamFakeAvi
+            p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] = updated.loadRemoteVideoThumbnails
         }
     }
 }

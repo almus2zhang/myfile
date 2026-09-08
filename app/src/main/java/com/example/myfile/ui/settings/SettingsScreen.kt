@@ -3,11 +3,14 @@ package com.example.myfile.ui.settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfile.R
@@ -27,6 +30,7 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
         64L * 1024 * 1024 to "64 MB"
     )
     var customChunk by remember { mutableStateOf("") }
+    var showTrafficDebug by remember { mutableStateOf(false) }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_settings)) }) }) { padding ->
         Column(
@@ -80,6 +84,60 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                         checked = s.streamFakeAvi,
                         onCheckedChange = { vm.updateStreamFakeAvi(it) }
                     )
+                }
+            }
+
+            // WebDAV 远程视频缩略图开关
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("WebDAV 远程视频缩略图", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "开启后进入网盘文件夹时尝试拉取视频首帧缩略图。注意：提取视频帧需持续从网盘拉取视频数据，会消耗网络流量与带宽（默认关闭以防偷跑流量）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = s.loadRemoteVideoThumbnails,
+                        onCheckedChange = { vm.updateLoadRemoteVideoThumbnails(it) }
+                    )
+                }
+            }
+
+            // 实时网络传输监视器入口
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("实时网络传输监控 (Debug)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "查看当前正在进行的网络传输、实时网速、传输来源及历史请求，支持手动终止活跃连接",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(onClick = { showTrafficDebug = true }) {
+                        Text("打开监控")
+                    }
                 }
             }
 
@@ -212,6 +270,12 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 )
             }
         }
+    }
+
+    if (showTrafficDebug) {
+        com.example.myfile.ui.components.DebugTrafficDialog(
+            onDismiss = { showTrafficDebug = false }
+        )
     }
 }
 

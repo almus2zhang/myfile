@@ -55,4 +55,8 @@ class SettingsViewModel : ViewModel() {
     fun updateStreamFakeAvi(enabled: Boolean) {
         viewModelScope.launch { store.update { it.copy(streamFakeAvi = enabled) } }
     }
+
+    fun updateLoadRemoteVideoThumbnails(enabled: Boolean) {
+        viewModelScope.launch { store.update { it.copy(loadRemoteVideoThumbnails = enabled) } }
+    }
 }

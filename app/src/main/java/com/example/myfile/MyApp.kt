@@ -113,9 +113,10 @@ class MyApp : Application(), ImageLoaderFactory {
             .protocols(listOf(Protocol.HTTP_1_1))
             // 关键：禁用 OkHttp 自动重定向跟随。PROPFIND 重定向时 OkHttp 会把方法
             // 改成 GET，导致服务端把 PROPFIND 当普通 GET 处理返回 404。
-            // 我们手动处理重定向：如果服务端 PROPFIND 返回 301/302，按 Location 重发。
             .followRedirects(false)
             .followSslRedirects(false)
+            // 挂载全局网络传输监视器，实时监控网速、请求来源与已传数据
+            .addNetworkInterceptor(com.example.myfile.core.TrafficMonitor.interceptor)
             .build()
 
         db = AppDatabase.get(this)
