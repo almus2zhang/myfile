@@ -43,7 +43,16 @@ class LocalViewModel : ViewModel() {
     private val _state = MutableStateFlow(LocalUiState(currentDir = rootDir))
     val state: StateFlow<LocalUiState> = _state.asStateFlow()
 
-    init { refresh() }
+    private fun getFolderSort(path: String): Pair<com.example.myfile.ui.webdav.SortMode, Boolean> {
+        val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildLocalKey(path)
+        return MyApp.instance.folderSortStore.getSort(folderKey) ?: (com.example.myfile.ui.webdav.SortMode.NAME to true)
+    }
+
+    init {
+        val (mode, asc) = getFolderSort(rootDir.absolutePath)
+        _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+        refresh()
+    }
 
     private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
 
@@ -54,7 +63,15 @@ class LocalViewModel : ViewModel() {
     fun getScrollPosition(path: String): Pair<Int, Int>? = scrollPositions[path]
 
     fun setSort(mode: com.example.myfile.ui.webdav.SortMode, asc: Boolean) {
+        val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildLocalKey(_state.value.currentDir.absolutePath)
+        MyApp.instance.folderSortStore.saveSort(folderKey, mode, asc)
         _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+    }
+
+    fun changeSort(mode: com.example.myfile.ui.webdav.SortMode) {
+        val cur = _state.value
+        val newAsc = if (cur.sortMode == mode) !cur.sortAsc else true
+        setSort(mode, newAsc)
     }
 
     fun isAtRoot(dir: File = _state.value.currentDir): Boolean {
@@ -74,8 +91,11 @@ class LocalViewModel : ViewModel() {
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
+            val (mode, asc) = getFolderSort(entry.path)
             _state.value = _state.value.copy(
                 currentDir = File(entry.path),
+                sortMode = mode,
+                sortAsc = asc,
                 selected = emptySet(),
                 multiSelectMode = false
             )
@@ -86,8 +106,11 @@ class LocalViewModel : ViewModel() {
     fun goUp() {
         if (isAtRoot()) return
         val parent = _state.value.currentDir.parentFile ?: return
+        val (mode, asc) = getFolderSort(parent.absolutePath)
         _state.value = _state.value.copy(
             currentDir = parent,
+            sortMode = mode,
+            sortAsc = asc,
             selected = emptySet(),
             multiSelectMode = false
         )

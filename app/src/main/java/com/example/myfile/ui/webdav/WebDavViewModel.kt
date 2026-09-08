@@ -54,13 +54,19 @@ class WebDavViewModel : ViewModel() {
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
 
+    private fun getFolderSort(accId: Long, path: String): Pair<SortMode, Boolean> {
+        val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildWebDavKey(accId, path)
+        return MyApp.instance.folderSortStore.getSort(folderKey) ?: (SortMode.NAME to true)
+    }
+
     init {
         viewModelScope.launch {
             var initialized = false
             accountStore.accounts.collect { list ->
                 val cur = _state.value.currentAccount ?: list.firstOrNull()
                 val prev = _state.value
-                _state.value = prev.copy(accounts = list, currentAccount = cur)
+                val (mode, asc) = if (cur != null) getFolderSort(cur.id, _state.value.currentPath) else (SortMode.NAME to true)
+                _state.value = prev.copy(accounts = list, currentAccount = cur, sortMode = mode, sortAsc = asc)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
                 if (!initialized && cur != null) {
                     initialized = true
@@ -73,9 +79,12 @@ class WebDavViewModel : ViewModel() {
     }
 
     fun selectAccount(account: WebDavAccount) {
+        val (mode, asc) = getFolderSort(account.id, "/")
         _state.value = _state.value.copy(
             currentAccount = account,
             currentPath = "/",
+            sortMode = mode,
+            sortAsc = asc,
             selected = emptySet(),
             multiSelectMode = false
         )
@@ -84,8 +93,12 @@ class WebDavViewModel : ViewModel() {
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
+            val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, entry.path) }
+                ?: (SortMode.NAME to true)
             _state.value = _state.value.copy(
                 currentPath = entry.path,
+                sortMode = mode,
+                sortAsc = asc,
                 selected = emptySet(),
                 multiSelectMode = false
             )
@@ -105,8 +118,12 @@ class WebDavViewModel : ViewModel() {
         val path = _state.value.currentPath.trimEnd('/')
         if (path.isEmpty() || path == "/") return
         val parent = path.substringBeforeLast('/').ifEmpty { "/" }
+        val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, parent) }
+            ?: (SortMode.NAME to true)
         _state.value = _state.value.copy(
             currentPath = parent,
+            sortMode = mode,
+            sortAsc = asc,
             selected = emptySet(),
             multiSelectMode = false
         )
@@ -116,8 +133,12 @@ class WebDavViewModel : ViewModel() {
     /** 面包屑跳转到指定路径 */
     fun navigateTo(path: String) {
         val normalized = path.trim().ifEmpty { "/" }
+        val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, normalized) }
+            ?: (SortMode.NAME to true)
         _state.value = _state.value.copy(
             currentPath = normalized,
+            sortMode = mode,
+            sortAsc = asc,
             selected = emptySet(),
             multiSelectMode = false
         )
@@ -190,19 +211,21 @@ class WebDavViewModel : ViewModel() {
         _state.value = _state.value.copy(message = null)
     }
 
-    /** 直接设置排序字段与升降序 */
+    /** 直接设置排序字段与升降序并记忆当前目录的设置 */
     fun setSort(mode: SortMode, asc: Boolean) {
+        val acc = _state.value.currentAccount
+        if (acc != null) {
+            val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildWebDavKey(acc.id, _state.value.currentPath)
+            MyApp.instance.folderSortStore.saveSort(folderKey, mode, asc)
+        }
         _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
     }
 
     /** 切换排序字段；若点击同一字段则翻转方向，否则升序 */
     fun changeSort(mode: SortMode) {
         val cur = _state.value
-        if (cur.sortMode == mode) {
-            _state.value = cur.copy(sortAsc = !cur.sortAsc)
-        } else {
-            _state.value = cur.copy(sortMode = mode, sortAsc = true)
-        }
+        val newAsc = if (cur.sortMode == mode) !cur.sortAsc else true
+        setSort(mode, newAsc)
     }
 
     fun refresh(): kotlinx.coroutines.Job {
