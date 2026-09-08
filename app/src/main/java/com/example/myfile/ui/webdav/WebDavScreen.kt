@@ -48,6 +48,7 @@ import com.example.myfile.model.FileEntry
 import com.example.myfile.ui.components.FileListItem
 import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
+import com.example.myfile.ui.components.ApkDownloadDialog
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -62,6 +63,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     var showMkdir by remember { mutableStateOf(false) }
     var mkdirName by remember { mutableStateOf("") }
     var showSortMenu by remember { mutableStateOf(false) }
+    var downloadingApkTaskId by remember { mutableStateOf<Long?>(null) }
+    var downloadingApkFileName by remember { mutableStateOf("") }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -499,23 +502,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             if (acc == null) return
                             scope.launch {
                                 val appCtx = context.applicationContext
-
-                                if (category == "apk" && !forceChooser) {
-                                    snackbarHostState.showSnackbar("正在准备安装包...", duration = SnackbarDuration.Short)
-                                    val tmp = FileOpener.downloadToCache(
-                                        client = com.example.myfile.MyApp.instance.okHttpClient,
-                                        authHeader = auth ?: "",
-                                        url = fullUrl,
-                                        fileName = entry.name
-                                    )
-                                    if (tmp != null && tmp.exists()) {
-                                        com.example.myfile.core.ApkInstaller.install(context, tmp)
-                                    } else {
-                                        snackbarHostState.showSnackbar("下载安装包失败")
-                                    }
-                                    return@launch
-                                }
-
                                 var intent = if (FileOpener.isVideo(entry.name)) {
                                     val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
                                     FileOpener.buildVideoStreamIntent(
@@ -618,6 +604,30 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 } else if (entry.isDirectory) {
                                     vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
                                     vm.open(entry)
+                                } else if (category == "apk") {
+                                    if (acc != null) {
+                                        scope.launch {
+                                            try {
+                                                com.example.myfile.core.download.DownloadService.start(MyApp.instance)
+                                                val dir = File(
+                                                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                    "myfile"
+                                                )
+                                                if (!dir.exists()) dir.mkdirs()
+                                                val taskId = MyApp.instance.downloadManager.startDownload(
+                                                    acc,
+                                                    entry.path,
+                                                    entry.name,
+                                                    dir,
+                                                    knownSize = entry.size
+                                                )
+                                                downloadingApkFileName = entry.name
+                                                downloadingApkTaskId = taskId
+                                            } catch (e: Exception) {
+                                                snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
+                                            }
+                                        }
+                                    }
                                 } else if (category == "image") {
                                     val idx = imageEntries.indexOfFirst { it.path == entry.path }
                                     if (idx >= 0) viewingImageIndex = idx
@@ -778,6 +788,21 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             baseUrl = base,
             authHeader = auth,
             onDismiss = { viewingImageIndex = null }
+        )
+    }
+
+    downloadingApkTaskId?.let { taskId ->
+        ApkDownloadDialog(
+            taskId = taskId,
+            fileName = downloadingApkFileName,
+            onDismissRequest = { downloadingApkTaskId = null },
+            onCancel = {
+                val idToCancel = taskId
+                downloadingApkTaskId = null
+                scope.launch {
+                    MyApp.instance.downloadManager.cancel(idToCancel)
+                }
+            }
         )
     }
 }

@@ -22,6 +22,9 @@ interface DownloadTaskDao {
     @Query("SELECT * FROM download_tasks WHERE id = :id")
     suspend fun getById(id: Long): DownloadTaskEntity?
 
+    @Query("SELECT * FROM download_tasks WHERE id = :id")
+    fun observeById(id: Long): Flow<DownloadTaskEntity?>
+
     /** 仅在任务处于 DOWNLOADING 时更新进度，绝不覆盖 COMPLETED/PAUSED/CANCELED */
     @Query("UPDATE download_tasks SET downloadedBytes = :downloaded, updatedAt = :ts WHERE id = :id AND status = 'DOWNLOADING'")
     suspend fun updateProgress(id: Long, downloaded: Long, ts: Long = System.currentTimeMillis())

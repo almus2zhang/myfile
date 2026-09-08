@@ -290,7 +290,7 @@ fun resolveVisualType(isDirectory: Boolean, fileName: String): VisualType {
     }
 }
 
-private fun formatSize(bytes: Long): String {
+fun formatSize(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val units = arrayOf("KB", "MB", "GB", "TB")
     var v = bytes.toDouble() / 1024
