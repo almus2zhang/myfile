@@ -3,10 +3,16 @@ package com.example.myfile.ui.local
 import android.net.Uri
 import android.os.Environment
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import androidx.compose.material.icons.Icons
@@ -158,6 +164,23 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
 
     val isRoot = vm.isAtRoot(state.currentDir)
 
+    val localCrumbs = remember(state.currentDir) {
+        val root = vm.rootDir
+        val rootPath = try { root.canonicalPath } catch (e: Exception) { root.absolutePath }
+        val curPath = try { state.currentDir.canonicalPath } catch (e: Exception) { state.currentDir.absolutePath }
+        val list = mutableListOf<Pair<String, File>>()
+        list.add("内部存储" to root)
+        if (curPath != rootPath && curPath.startsWith(rootPath)) {
+            val rel = curPath.removePrefix(rootPath).trimStart(File.separatorChar, '/')
+            var accum = root
+            rel.split(File.separatorChar).filter { it.isNotEmpty() }.forEach { part ->
+                accum = File(accum, part)
+                list.add(part to accum)
+            }
+        }
+        list
+    }
+
     // 系统返回键：如果处于多选模式则取消多选；若非顶层目录则返回上一层；若已在内部存储顶层则放行（退出应用）
     BackHandler(enabled = !isRoot || state.multiSelectMode) {
         if (state.multiSelectMode) {
@@ -297,13 +320,68 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             }
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .nestedScroll(pullRefreshState.nestedScrollConnection)
         ) {
-            LazyColumn(
+            // 面包屑路径条：采用微胶囊风格与平滑横向滚动
+            if (localCrumbs.size > 1) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        localCrumbs.forEachIndexed { index, (name, dir) ->
+                            if (index > 0) {
+                                Text(
+                                    text = "›",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                            val isCurrent = index == localCrumbs.lastIndex
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        if (!isCurrent) {
+                                            vm.saveScrollPosition(state.currentDir.absolutePath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                                            vm.navigateTo(dir)
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = name,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+                    .nestedScroll(pullRefreshState.nestedScrollConnection)
+            ) {
+                LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -420,7 +498,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         }
                     }
                 )
-                HorizontalDivider()
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 74.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                )
             }
         }
         if (pullRefreshState.verticalOffset > 0.5f || pullRefreshState.isRefreshing) {
@@ -448,6 +529,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     }
                 }
             )
+        }
         }
     }
 }

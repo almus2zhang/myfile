@@ -2,6 +2,7 @@ package com.example.myfile.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,17 +16,25 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
-import com.example.myfile.core.FileOpener
 import com.example.myfile.model.FileEntry
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * 精美文件列表条目组件：
+ * - 44dp 柔和圆角卡片底衬徽章图标
+ * - 细分格式色彩与高质感分类
+ * - 规范化双行排版与清晰元数据层级
+ * - 视频观看进度独立微胶囊 Badge
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileListItem(
@@ -39,24 +48,27 @@ fun FileListItem(
     videoProgress: Float? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
+    val visualType = resolveVisualType(entry.isDirectory, entry.name)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
                 else MaterialTheme.colorScheme.surface
             )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 图标 / 缩略图
-        val category = FileOpener.fileCategory(entry.name)
-        if (!entry.isDirectory && (category == "image" || category == "video") && thumbnailUrl != null) {
+        // 图标 / 缩略图区域
+        val isMedia = !entry.isDirectory && (visualType == VisualType.IMAGE || visualType == VisualType.VIDEO)
+        if (isMedia && thumbnailUrl != null) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 val cKey = thumbnailKey ?: "thumb_${entry.path}"
                 AsyncImage(
@@ -68,22 +80,33 @@ fun FileListItem(
                             if (thumbnailAuth != null) {
                                 addHeader("Authorization", thumbnailAuth)
                             }
-                            if (category == "video") videoFrameMillis(1000)
+                            if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
                         }
                         .crossfade(true)
                         .build(),
                     contentDescription = entry.name,
                     contentScale = ContentScale.Crop,
-                    error = androidx.compose.ui.graphics.vector.rememberVectorPainter(iconFor(entry.isDirectory, category)),
-                    fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(iconFor(entry.isDirectory, category)),
+                    error = androidx.compose.ui.graphics.vector.rememberVectorPainter(visualType.icon),
+                    fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(visualType.icon),
                     modifier = Modifier.fillMaxSize()
                 )
-                if (category == "video" && videoProgress != null && videoProgress > 0f) {
+                // 柔和微边框，增强在浅色/深色背景下的视觉边界感
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(
+                            width = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                )
+                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
                     LinearProgressIndicator(
                         progress = { videoProgress.coerceIn(0f, 1f) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
+                            .height(3.5.dp)
                             .align(Alignment.BottomCenter),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = Color.Black.copy(alpha = 0.5f)
@@ -91,87 +114,157 @@ fun FileListItem(
                 }
             }
         } else {
+            // 质感卡片底衬徽章
             Box(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(visualType.tintColor.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = iconFor(entry.isDirectory, category),
+                    imageVector = visualType.icon,
                     contentDescription = null,
-                    tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
-                    else iconTint(category),
-                    modifier = Modifier.size(32.dp)
+                    tint = visualType.tintColor,
+                    modifier = Modifier.size(26.dp)
                 )
-                if (category == "video" && videoProgress != null && videoProgress > 0f) {
+                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
                     LinearProgressIndicator(
                         progress = { videoProgress.coerceIn(0f, 1f) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(3.dp)
                             .align(Alignment.BottomCenter),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        color = visualType.tintColor,
+                        trackColor = visualType.tintColor.copy(alpha = 0.2f)
                     )
                 }
             }
         }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        // 文本信息区域
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
             Text(
                 text = entry.name,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = Int.MAX_VALUE,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 21.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+
             val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-            val progressText = if (category == "video" && videoProgress != null && videoProgress > 0f) {
-                "  ·  已看 ${(videoProgress * 100).toInt()}%"
-            } else ""
-            Text(
-                text = if (entry.isDirectory) "文件夹 · ${fmt.format(Date(entry.lastModified))}"
-                else "${formatSize(entry.size)}$progressText  ·  ${fmt.format(Date(entry.lastModified))}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            val dateStr = fmt.format(Date(entry.lastModified))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val metaText = if (entry.isDirectory) {
+                    "文件夹  ·  $dateStr"
+                } else {
+                    "${formatSize(entry.size)}  ·  $dateStr"
+                }
+                Text(
+                    text = metaText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // 观看进度独立微胶囊 Badge
+                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(start = 2.dp)
+                    ) {
+                        Text(
+                            text = "已看 ${(videoProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+            }
         }
+
         if (isSelected) {
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(Icons.Filled.CheckCircle, "已选", tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = "已选",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
         } else if (trailing != null) {
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             trailing()
         }
     }
 }
 
-/** 根据类型返回图标 */
-private fun iconFor(isDirectory: Boolean, category: String): ImageVector {
-    if (isDirectory) return Icons.Filled.Folder
-    return when (category) {
-        "video" -> Icons.Filled.Movie
-        "image" -> Icons.Filled.Image
-        "audio" -> Icons.Filled.AudioFile
-        "text" -> Icons.Filled.Article
-        "archive" -> Icons.Filled.FolderZip
-        "doc" -> Icons.Filled.Description
-        "apk" -> Icons.Filled.Android
-        else -> Icons.Filled.InsertDriveFile
-    }
+/**
+ * 文件视觉类型定义
+ */
+enum class VisualType(
+    val icon: ImageVector,
+    val tintColor: Color
+) {
+    FOLDER(Icons.Filled.Folder, Color(0xFFFFA000)),         // 暖金琥珀
+    VIDEO(Icons.Filled.Movie, Color(0xFF7C4DFF)),          // 优雅紫罗兰
+    IMAGE(Icons.Filled.Image, Color(0xFF00897B)),          // 清新翡翠绿
+    AUDIO(Icons.Filled.AudioFile, Color(0xFFFF5722)),      // 活力珊瑚橙
+    PDF(Icons.Filled.PictureAsPdf, Color(0xFFE53935)),     // 专业朱砂红
+    WORD(Icons.Filled.Description, Color(0xFF1E88E5)),     // 商务湛蓝
+    EXCEL(Icons.Filled.TableChart, Color(0xFF2E7D32)),     // 办公森林绿
+    PPT(Icons.Filled.Slideshow, Color(0xFFFB8C00)),        // 演示暖橙
+    CODE(Icons.Filled.Code, Color(0xFF0097A7)),            // 科技深青
+    ARCHIVE(Icons.Filled.FolderZip, Color(0xFF6D4C41)),    // 复古质感棕
+    APK(Icons.Filled.Android, Color(0xFF43A047)),          // Android 质感绿
+    OTHER(Icons.Filled.InsertDriveFile, Color(0xFF78909C)) // 现代板岩灰
 }
 
-/** 图标着色 */
-private fun iconTint(category: String): Color {
-    return when (category) {
-        "video" -> Color(0xFF7B1FA2)      // 紫
-        "image" -> Color(0xFF388E3C)      // 绿
-        "audio" -> Color(0xFFE65100)      // 橙
-        "text" -> Color(0xFF1565C0)       // 蓝
-        "archive" -> Color(0xFF6D4C41)    // 棕
-        "doc" -> Color(0xFF0277BD)        // 深蓝
-        "apk" -> Color(0xFF4CAF50)        // 绿
-        else -> Color(0xFF757575)         // 灰
+/**
+ * 根据目录与扩展名解析出细致的视觉分类
+ */
+fun resolveVisualType(isDirectory: Boolean, fileName: String): VisualType {
+    if (isDirectory) return VisualType.FOLDER
+    val ext = fileName.substringAfterLast('.', "").lowercase()
+    return when (ext) {
+        "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "ts", "m4v",
+        "mpg", "mpeg", "3gp", "rmvb", "rm", "vob", "m2ts", "iso" -> VisualType.VIDEO
+
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "raw", "dng" -> VisualType.IMAGE
+
+        "mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus", "ape", "alac", "mid", "midi" -> VisualType.AUDIO
+
+        "pdf" -> VisualType.PDF
+
+        "doc", "docx", "dot", "dotx", "rtf", "odt", "pages", "wps" -> VisualType.WORD
+
+        "xls", "xlsx", "xlt", "xltx", "csv", "tsv", "ods", "numbers", "et" -> VisualType.EXCEL
+
+        "ppt", "pptx", "pot", "potx", "pps", "odp", "key", "keynote", "dps" -> VisualType.PPT
+
+        "txt", "log", "md", "markdown", "json", "xml", "html", "htm", "css", "js", "ts",
+        "jsx", "tsx", "kt", "kts", "java", "py", "c", "cpp", "h", "hpp", "go", "rs",
+        "sh", "bash", "zsh", "yaml", "yml", "ini", "conf", "properties", "sql", "gradle" -> VisualType.CODE
+
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz", "z", "cab", "dmg", "7-zip" -> VisualType.ARCHIVE
+
+        "apk", "xapk", "apks", "aab" -> VisualType.APK
+
+        else -> VisualType.OTHER
     }
 }
 
@@ -186,3 +279,4 @@ private fun formatSize(bytes: Long): String {
 
 fun formatSizeStatic(bytes: Long): String = formatSize(bytes)
 fun formatSpeed(bytesPerSec: Long): String = formatSize(bytesPerSec) + "/s"
+

@@ -103,6 +103,18 @@ class LocalViewModel : ViewModel() {
         }
     }
 
+    fun navigateTo(dir: File) {
+        val (mode, asc) = getFolderSort(dir.absolutePath)
+        _state.value = _state.value.copy(
+            currentDir = dir,
+            sortMode = mode,
+            sortAsc = asc,
+            selected = emptySet(),
+            multiSelectMode = false
+        )
+        refresh()
+    }
+
     fun goUp() {
         if (isAtRoot()) return
         val parent = _state.value.currentDir.parentFile ?: return

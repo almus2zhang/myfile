@@ -17,7 +17,10 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -392,37 +395,52 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 )
             }
 
-            // 面包屑路径栏：可点击跳转，过长可左右拖动
+            // 面包屑路径栏：采用微胶囊风格与平滑横向滚动
             if (state.currentAccount != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    crumbs.forEachIndexed { index, crumb ->
-                        if (index > 0) {
-                            Icon(
-                                Icons.Filled.ArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        crumbs.forEachIndexed { index, crumb ->
+                            if (index > 0) {
+                                Text(
+                                    text = "›",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                            val isCurrent = index == crumbs.lastIndex
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        if (!isCurrent) {
+                                            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                                            vm.navigateTo(crumb.path)
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = crumb.name,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
-                        Text(
-                            text = crumb.name,
-                            color = if (index == crumbs.lastIndex) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .clickable {
-                                    vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                                    vm.navigateTo(crumb.path)
-                                }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
                     }
                 }
             }
@@ -623,7 +641,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 }
                             }
                         )
-                        HorizontalDivider()
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 74.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
                     }
                 }
             }
