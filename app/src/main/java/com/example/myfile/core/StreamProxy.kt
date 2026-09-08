@@ -1,34 +1,43 @@
-package com.example.myfile.core
+﻿package com.example.myfile.core
 
+import android.media.MediaMetadataRetriever
 import android.util.Log
+import com.example.myfile.MyApp
+import com.example.myfile.data.db.entity.VideoProgressEntity
 import com.example.myfile.model.WebDavAccount
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.ServerSocket
 import java.net.URLDecoder
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 本地 HTTP 流式代理：把带 Basic Auth 的 WebDAV 文件转成无认证的
- * http://127.0.0.1:<port>/<token>/<url-encoded-path> 链接，交给第三方播放器。
+ * http://127.0.0.1:<port>/<token>/<filename> 链接，交给第三方播放器。
  *
  * 播放器通过该本地地址流式读取（内部自行缓冲/seek），避免先完整下载。
  * 支持 Range 请求，让视频播放器可以拖动进度条。
+ * 采用固定优先端口与基于文件唯一路径的 MD5 标识，使得第三方播放器内部的历史进度记忆机制能准确命中同一文件！
  */
 object StreamProxy {
 
     private const val TAG = "StreamProxy"
     private const val BUFFER = 64 * 1024
+    private const val PREFERRED_PORT = 58241
 
     @Volatile
     private var serverSocket0: ServerSocket? = null
     private var port: Int = 0
     private var serverThread: Thread? = null
     private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val proxyScope = CoroutineScope(Dispatchers.IO)
 
-    /** token -> (client, baseUrl, username, password, remotePath) */
+    /** token -> Entry */
     private val entries = ConcurrentHashMap<String, Entry>()
 
     private data class Entry(
@@ -36,14 +45,19 @@ object StreamProxy {
         val baseUrl: String,
         val username: String,
         val password: String,
-        val remotePath: String
+        val remotePath: String,
+        val rawKey: String
     )
 
-    /** 懒启动本地服务器，返回端口 */
+    /** 启动本地服务器，优先使用固定端口 58241，被占用则由系统分配 */
     @Synchronized
     private fun ensureStarted(): Int {
         if (running.get()) return port
-        val ss = ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+        val ss = try {
+            ServerSocket(PREFERRED_PORT, 50, java.net.InetAddress.getByName("127.0.0.1"))
+        } catch (_: Exception) {
+            ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+        }
         port = ss.localPort
         serverSocket0 = ss
         running.set(true)
@@ -81,7 +95,7 @@ object StreamProxy {
                 val method = parts[0]
                 val rawPath = parts[1]
 
-                // 读取并丢弃请求头
+                // 读取并解析请求头
                 val headers = HashMap<String, String>()
                 while (true) {
                     val line = readLine(input) ?: break
@@ -91,17 +105,16 @@ object StreamProxy {
                         line.substring(idx + 1).trim()
                 }
 
-                // 解析 /token/encoded-path
+                // 解析 /token/encoded-filename
                 val path = URLDecoder.decode(rawPath, "UTF-8")
                 val seg = path.trimStart('/').split('/', limit = 2)
-                if (seg.size < 2) { writeError(output, 400, "bad path"); return }
+                if (seg.isEmpty()) { writeError(output, 400, "bad path"); return }
                 val token = seg[0]
-                val remotePath = "/" + seg[1]
                 val entry = entries[token]
                 if (entry == null) { writeError(output, 404, "stream expired"); return }
 
                 val rangeHeader = headers["range"]
-                val upstream = buildRequest(entry, remotePath, rangeHeader)
+                val upstream = buildRequest(entry, entry.remotePath, rangeHeader)
 
                 entry.client.newCall(upstream).execute().use { resp ->
                     val status = resp.code
@@ -120,6 +133,35 @@ object StreamProxy {
                     output.write("Connection: close\r\n".toByteArray())
                     output.write("\r\n".toByteArray())
 
+                    // 根据 Content-Range 估算并实时记录当前流式播放字节进度
+                    val cr = respHeaders["Content-Range"]
+                    if (cr != null) {
+                        val match = Regex("""bytes\s+(\d+)-\d+/(\d+)""").find(cr)
+                        val startByte = match?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                        val totalBytes = match?.groupValues?.get(2)?.toLongOrNull() ?: 0L
+                        if (totalBytes > 0L && startByte > 0L) {
+                            val ratio = startByte.toDouble() / totalBytes
+                            proxyScope.launch {
+                                try {
+                                    val existing = MyApp.instance.db.videoProgressDao().get(entry.rawKey)
+                                    if (existing != null && existing.durationMs > 0L) {
+                                        val calculatedPos = (ratio * existing.durationMs).toLong()
+                                        if (calculatedPos > 1000L) {
+                                            MyApp.instance.db.videoProgressDao().save(
+                                                VideoProgressEntity(
+                                                    uriKey = entry.rawKey,
+                                                    positionMs = calculatedPos,
+                                                    durationMs = existing.durationMs,
+                                                    updatedAt = System.currentTimeMillis()
+                                                )
+                                            )
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+
                     respBody?.byteStream()?.use { bodyIn ->
                         val buf = ByteArray(BUFFER)
                         while (true) {
@@ -137,7 +179,8 @@ object StreamProxy {
     }
 
     private fun buildRequest(entry: Entry, remotePath: String, rangeHeader: String?): Request {
-        val fullUrl = entry.baseUrl.trimEnd('/') + remotePath
+        val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
+        val fullUrl = entry.baseUrl.trimEnd('/') + path
         val auth = "Basic " + Base64.getEncoder()
             .encodeToString("${entry.username}:${entry.password}".toByteArray())
         return Request.Builder()
@@ -172,7 +215,7 @@ object StreamProxy {
     }
 
     /**
-     * 为指定账户的远程文件注册一个流式代理，返回本地可访问的 http URL。
+     * 为指定账户的远程文件注册一个流式代理，返回本地可访问的稳定 http URL。
      */
     fun register(
         client: OkHttpClient,
@@ -180,19 +223,52 @@ object StreamProxy {
         remotePath: String
     ): String {
         val p = ensureStarted()
-        val token = java.util.UUID.randomUUID().toString().replace("-", "")
-        entries[token] = Entry(
+        val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
+        val rawKey = "${account.url.trimEnd('/')}$path"
+        val md5 = MessageDigest.getInstance("MD5")
+            .digest(rawKey.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+        entries[md5] = Entry(
             client = client,
             baseUrl = account.url,
             username = account.username,
             password = account.password,
-            remotePath = remotePath
+            remotePath = path,
+            rawKey = rawKey
         )
-        val encoded = java.net.URLEncoder.encode(remotePath.trimStart('/'), "UTF-8")
-        return "http://127.0.0.1:$p/$token/$encoded"
+
+        val fileName = path.substringAfterLast('/').ifBlank { "video.mp4" }
+        val encodedName = java.net.URLEncoder.encode(fileName, "UTF-8").replace("+", "%20")
+        val streamUrl = "http://127.0.0.1:$p/$md5/$encodedName"
+
+        // 后台异步获取视频总时长（若数据库中尚无此视频时长记录）
+        proxyScope.launch {
+            try {
+                val existing = MyApp.instance.db.videoProgressDao().get(rawKey)
+                if (existing == null || existing.durationMs <= 0L) {
+                    val mmr = MediaMetadataRetriever()
+                    mmr.setDataSource(streamUrl, emptyMap())
+                    val dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    mmr.release()
+                    if (dur > 0L) {
+                        MyApp.instance.db.videoProgressDao().save(
+                            VideoProgressEntity(
+                                uriKey = rawKey,
+                                positionMs = existing?.positionMs ?: 0L,
+                                durationMs = dur,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return streamUrl
     }
 
-    /** 释放某个 token（播放器关闭后清理，避免内存泄漏） */
+    /** 释放某个 token */
     fun unregister(token: String) {
         entries.remove(token)
     }

@@ -33,7 +33,6 @@ object FileOpener {
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         } catch (e: Exception) {
             Log.e("FileOpener", "build local intent failed", e)
@@ -53,7 +52,6 @@ object FileOpener {
             val mime = guessMime(fileName)
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(Uri.parse(localUrl), mime)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         } catch (e: Exception) {
             Log.e("FileOpener", "build video intent failed", e)

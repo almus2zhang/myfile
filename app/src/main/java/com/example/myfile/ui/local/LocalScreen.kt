@@ -169,9 +169,34 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                 intent.putExtra("position", saved.positionMs.toInt())
                                 intent.putExtra("position_ms", saved.positionMs)
                                 intent.putExtra("extra_position", saved.positionMs)
+                                intent.putExtra("time", (saved.positionMs / 1000).toInt())
                                 intent.putExtra("from_start", false)
                             }
                             intent.putExtra("return_result", true)
+
+                            // 后台异步解析视频时长并记录，确保进度条比例准确
+                            if (saved == null || saved.durationMs <= 0L) {
+                                kotlinx.coroutines.Dispatchers.IO.let { ioDispatcher ->
+                                    launch(ioDispatcher) {
+                                        try {
+                                            val mmr = android.media.MediaMetadataRetriever()
+                                            mmr.setDataSource(entry.path)
+                                            val dur = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                                            mmr.release()
+                                            if (dur > 0L) {
+                                                MyApp.instance.db.videoProgressDao().save(
+                                                    VideoProgressEntity(
+                                                        uriKey = entry.path,
+                                                        positionMs = saved?.positionMs ?: 0L,
+                                                        durationMs = dur,
+                                                        updatedAt = System.currentTimeMillis()
+                                                    )
+                                                )
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }
                         }
 
                         val defaultApp = MyApp.instance.defaultAppStore.get(category)
@@ -181,6 +206,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                 val explicit = Intent(intent).apply {
                                     component = ComponentName(parts[0], parts[1])
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                                 }
                                 currentWatchingVideoKey = if (category == "video") entry.path else null
                                 try {
@@ -284,6 +310,7 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     val explicit = Intent(req.intent).apply {
                         component = candidate.component
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                     }
                     currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
                     try {
@@ -295,8 +322,12 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                 openWithRequest = null
             },
             onSystemChooser = {
-                val chooser = Intent.createChooser(req.intent, "打开为").apply {
+                val clean = Intent(req.intent).apply {
+                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                }
+                val chooser = Intent.createChooser(clean, "打开为").apply {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                 }
                 currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
                 try {

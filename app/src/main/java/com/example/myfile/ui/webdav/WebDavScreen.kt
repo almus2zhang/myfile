@@ -266,7 +266,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                         val fullUrl = base + p
                         val category = FileOpener.fileCategory(entry.name)
-                        val videoKey = acc?.let { "${it.url}|${entry.path}" } ?: entry.path
+                        val videoKey = acc?.let { "${it.url.trimEnd('/')}$p" } ?: entry.path
 
                         // 打开文件：先尝试 myfile 记录的默认程序，无则弹「打开方式」对话框
                         fun openEntry(forceChooser: Boolean) {
@@ -318,6 +318,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         finalIntent.putExtra("position", saved.positionMs.toInt())
                                         finalIntent.putExtra("position_ms", saved.positionMs)
                                         finalIntent.putExtra("extra_position", saved.positionMs)
+                                        finalIntent.putExtra("time", (saved.positionMs / 1000).toInt())
                                         finalIntent.putExtra("from_start", false)
                                     }
                                     finalIntent.putExtra("return_result", true)
@@ -331,6 +332,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         val explicit = Intent(finalIntent).apply {
                                             component = ComponentName(parts[0], parts[1])
                                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                                         }
                                         currentWatchingVideoKey = if (category == "video") videoKey else null
                                         try {
@@ -449,6 +451,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     val explicit = Intent(req.intent).apply {
                         component = candidate.component
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                     }
                     currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
                     try {
@@ -460,8 +463,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 openWithRequest = null
             },
             onSystemChooser = {
-                val chooser = Intent.createChooser(req.intent, "打开为").apply {
+                val clean = Intent(req.intent).apply {
+                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                }
+                val chooser = Intent.createChooser(clean, "打开为").apply {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                 }
                 currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
                 try {
