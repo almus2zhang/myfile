@@ -356,4 +356,25 @@ class WebDavViewModel : ViewModel() {
             }
         }
     }
+
+    fun rename(entry: FileEntry, newName: String) {
+        val acc = _state.value.currentAccount ?: return
+        val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
+        val dir = p.substringBeforeLast('/', "")
+        val targetPath = if (dir.isEmpty()) "/$newName" else "$dir/$newName"
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true)
+            try {
+                val ok = repo.rename(acc, p, targetPath)
+                if (ok) {
+                    _state.value = _state.value.copy(loading = false, message = "重命名成功")
+                    refresh()
+                } else {
+                    _state.value = _state.value.copy(loading = false, error = "重命名失败")
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(loading = false, error = "重命名失败: ${e.message}")
+            }
+        }
+    }
 }

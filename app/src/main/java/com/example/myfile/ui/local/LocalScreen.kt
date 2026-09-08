@@ -158,6 +158,8 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     }
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
     var currentWatchingVideoKey by remember { mutableStateOf<String?>(null) }
+    var renamingEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var propertiesEntry by remember { mutableStateOf<FileEntry?>(null) }
 
     val externalLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -522,23 +524,52 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     onLongClick = { vm.toggleSelect(entry.path) },
                     isSelected = entry.path in state.selected,
                     trailing = {
-                        if (!entry.isDirectory && !state.multiSelectMode) {
+                        if (!state.multiSelectMode) {
                             var showMenu by remember { mutableStateOf(false) }
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Filled.MoreVert, "更多")
-                            }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("打开为…") },
-                                    onClick = {
-                                        showMenu = false
-                                        openEntry(forceChooser = true)
+                            Box {
+                                IconButton(onClick = { showMenu = true }) {
+                                    Icon(Icons.Filled.MoreVert, "更多")
+                                }
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false }
+                                ) {
+                                    if (!entry.isDirectory) {
+                                        DropdownMenuItem(
+                                            text = { Text("打开为…") },
+                                            leadingIcon = { Icon(Icons.Filled.OpenInNew, null) },
+                                            onClick = {
+                                                showMenu = false
+                                                openEntry(forceChooser = true)
+                                            }
+                                        )
                                     }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("删除") },
-                                    onClick = { showMenu = false; vm.deleteOne(entry) }
-                                )
+                                    DropdownMenuItem(
+                                        text = { Text("重命名") },
+                                        leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                        onClick = {
+                                            showMenu = false
+                                            renamingEntry = entry
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("属性") },
+                                        leadingIcon = { Icon(Icons.Filled.Info, null) },
+                                        onClick = {
+                                            showMenu = false
+                                            propertiesEntry = entry
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            showMenu = false
+                                            vm.deleteOne(entry)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -651,6 +682,29 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
             images = imageEntries,
             initialIndex = idx,
             onDismiss = { viewingImageIndex = null }
+        )
+    }
+
+    // 重命名对话框
+    renamingEntry?.let { entry ->
+        com.example.myfile.ui.components.FileRenameDialog(
+            entry = entry,
+            onDismiss = { renamingEntry = null },
+            onConfirm = { newName ->
+                vm.rename(entry, newName)
+            }
+        )
+    }
+
+    // 文件/文件夹属性对话框
+    propertiesEntry?.let { entry ->
+        val vProg = progressMap[entry.path]
+        com.example.myfile.ui.components.FilePropertiesDialog(
+            entry = entry,
+            accountName = null,
+            videoDurationMs = vProg?.durationMs,
+            videoPositionMs = vProg?.positionMs,
+            onDismiss = { propertiesEntry = null }
         )
     }
 }

@@ -205,7 +205,16 @@ class LocalViewModel : ViewModel() {
 
     fun rename(entry: FileEntry, newName: String) {
         viewModelScope.launch {
-            repo.rename(File(entry.path), newName)
+            if (entry.path.startsWith("content://")) {
+                try {
+                    val uri = android.net.Uri.parse(entry.path)
+                    val df = androidx.documentfile.provider.DocumentFile.fromSingleUri(MyApp.instance, uri)
+                        ?: androidx.documentfile.provider.DocumentFile.fromTreeUri(MyApp.instance, uri)
+                    df?.renameTo(newName)
+                } catch (_: Exception) {}
+            } else {
+                repo.rename(File(entry.path), newName)
+            }
             refresh()
         }
     }

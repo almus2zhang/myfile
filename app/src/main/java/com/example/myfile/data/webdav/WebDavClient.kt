@@ -284,11 +284,14 @@ class WebDavClient(
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 204 }
     }
 
-    fun move(from: String, to: String): Boolean {
-        val req = requestBuilder("MOVE", from)
+    fun move(from: String, to: String, mtime: Long? = null): Boolean {
+        val b = requestBuilder("MOVE", from)
             .header("Destination", fullUrl(to))
             .header("Overwrite", "T")
-            .build()
+        if (mtime != null && mtime > 0L) {
+            b.header("X-OC-Mtime", "${mtime / 1000}")
+        }
+        val req = b.build()
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 }
     }
 

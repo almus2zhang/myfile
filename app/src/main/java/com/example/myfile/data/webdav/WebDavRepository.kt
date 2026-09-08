@@ -109,8 +109,8 @@ class WebDavRepository(
     suspend fun delete(account: WebDavAccount, path: String): Boolean =
         withContext(Dispatchers.IO) { withDynamicRetry(account) { it.delete(path) } }
 
-    suspend fun rename(account: WebDavAccount, from: String, to: String): Boolean =
-        withContext(Dispatchers.IO) { withDynamicRetry(account) { it.move(from, to) } }
+    suspend fun rename(account: WebDavAccount, from: String, to: String, mtime: Long? = null): Boolean =
+        withContext(Dispatchers.IO) { withDynamicRetry(account) { it.move(from, to, mtime) } }
 
     suspend fun upload(account: WebDavAccount, path: String, bytes: ByteArray): Boolean =
         withContext(Dispatchers.IO) { withDynamicRetry(account) { it.upload(path, bytes) } }
