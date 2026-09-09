@@ -75,6 +75,12 @@ class MyApp : Application(), ImageLoaderFactory {
     lateinit var folderSortStore: com.example.myfile.data.prefs.FolderSortStore
         private set
 
+    lateinit var accountPathStore: com.example.myfile.data.prefs.AccountPathStore
+        private set
+
+    lateinit var viewModeStore: com.example.myfile.data.prefs.ViewModeStore
+        private set
+
     lateinit var webDavRepository: WebDavRepository
         private set
 
@@ -125,6 +131,8 @@ class MyApp : Application(), ImageLoaderFactory {
         settingsStore = SettingsStore(this)
         defaultAppStore = DefaultAppStore(this)
         folderSortStore = com.example.myfile.data.prefs.FolderSortStore(this)
+        accountPathStore = com.example.myfile.data.prefs.AccountPathStore(this)
+        viewModeStore = com.example.myfile.data.prefs.ViewModeStore(this)
 
         appScope.launch {
             settingsStore.settings.collect { _currentSettings.value = it }

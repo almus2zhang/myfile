@@ -120,4 +120,7 @@ class WebDavRepository(
 
     suspend fun uploadFile(account: WebDavAccount, path: String, file: java.io.File): Boolean =
         withContext(Dispatchers.IO) { withDynamicRetry(account) { it.uploadFile(path, file) } }
+
+    suspend fun download(account: WebDavAccount, path: String): okhttp3.Response =
+        withContext(Dispatchers.IO) { withDynamicRetry(account) { it.download(path) } }
 }

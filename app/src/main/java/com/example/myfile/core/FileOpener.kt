@@ -189,6 +189,19 @@ object FileOpener {
         return ext in videoExtensions
     }
 
+    /** 文本/代码扩展名集合 */
+    private val textExtensions = setOf(
+        "txt", "log", "md", "json", "xml", "csv", "ini", "conf", "yml", "yaml",
+        "html", "htm", "css", "js", "ts", "jsx", "tsx", "py", "java", "kt", "kts",
+        "c", "cpp", "h", "hpp", "sh", "bash", "sql", "properties", "gradle", "toml",
+        "env", "bat", "cmd", "go", "rs", "php", "lua", "r", "swift", "dart", "v", "zsh"
+    )
+
+    fun isText(fileName: String): Boolean {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        return ext in textExtensions
+    }
+
     /** 判断扩展名类型（用于图标显示 & 默认程序映射）：video / image / audio / text / archive / doc / apk / other */
     fun fileCategory(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
@@ -196,7 +209,7 @@ object FileOpener {
             in videoExtensions -> "video"
             in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "ico") -> "image"
             in setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus") -> "audio"
-            in setOf("txt", "log", "md", "json", "xml", "csv", "ini", "conf", "yml", "yaml") -> "text"
+            in textExtensions -> "text"
             in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> "archive"
             in setOf("doc", "docx", "pdf", "ppt", "pptx", "xls", "xlsx") -> "doc"
             "apk" -> "apk"

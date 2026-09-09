@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+import com.example.myfile.model.ViewMode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 data class WebDavUiState(
     val accounts: List<WebDavAccount> = emptyList(),
     val currentAccount: WebDavAccount? = null,
@@ -51,8 +55,17 @@ enum class SortMode(val label: String) {
 class WebDavViewModel : ViewModel() {
     private val accountStore = MyApp.instance.accountStore
     private val repo = MyApp.instance.webDavRepository
+    private val pathStore = MyApp.instance.accountPathStore
+    private val viewModeStore = MyApp.instance.viewModeStore
+
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
+
+    val viewMode: StateFlow<ViewMode> = viewModeStore.webDavViewMode
+
+    fun setViewMode(mode: ViewMode) {
+        viewModeStore.setWebDavViewMode(mode)
+    }
 
     private fun getFolderSort(accId: Long, path: String): Pair<SortMode, Boolean> {
         val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildWebDavKey(accId, path)
@@ -65,8 +78,9 @@ class WebDavViewModel : ViewModel() {
             accountStore.accounts.collect { list ->
                 val cur = _state.value.currentAccount ?: list.firstOrNull()
                 val prev = _state.value
-                val (mode, asc) = if (cur != null) getFolderSort(cur.id, _state.value.currentPath) else (SortMode.NAME to true)
-                _state.value = prev.copy(accounts = list, currentAccount = cur, sortMode = mode, sortAsc = asc)
+                val initialPath = if (cur != null) pathStore.getLastPath(cur.id) else "/"
+                val (mode, asc) = if (cur != null) getFolderSort(cur.id, initialPath) else (SortMode.NAME to true)
+                _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = initialPath, sortMode = mode, sortAsc = asc)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
                 if (!initialized && cur != null) {
                     initialized = true
@@ -79,10 +93,16 @@ class WebDavViewModel : ViewModel() {
     }
 
     fun selectAccount(account: WebDavAccount) {
-        val (mode, asc) = getFolderSort(account.id, "/")
+        // 保存当前账户路径
+        _state.value.currentAccount?.let {
+            pathStore.saveLastPath(it.id, _state.value.currentPath)
+        }
+        // 恢复目标账户上次打开的路径
+        val targetPath = pathStore.getLastPath(account.id)
+        val (mode, asc) = getFolderSort(account.id, targetPath)
         _state.value = _state.value.copy(
             currentAccount = account,
-            currentPath = "/",
+            currentPath = targetPath,
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
@@ -93,6 +113,9 @@ class WebDavViewModel : ViewModel() {
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
+            _state.value.currentAccount?.let {
+                pathStore.saveLastPath(it.id, entry.path)
+            }
             val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, entry.path) }
                 ?: (SortMode.NAME to true)
             _state.value = _state.value.copy(
@@ -118,6 +141,9 @@ class WebDavViewModel : ViewModel() {
         val path = _state.value.currentPath.trimEnd('/')
         if (path.isEmpty() || path == "/") return
         val parent = path.substringBeforeLast('/').ifEmpty { "/" }
+        _state.value.currentAccount?.let {
+            pathStore.saveLastPath(it.id, parent)
+        }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, parent) }
             ?: (SortMode.NAME to true)
         _state.value = _state.value.copy(
@@ -133,6 +159,9 @@ class WebDavViewModel : ViewModel() {
     /** 面包屑跳转到指定路径 */
     fun navigateTo(path: String) {
         val normalized = path.trim().ifEmpty { "/" }
+        _state.value.currentAccount?.let {
+            pathStore.saveLastPath(it.id, normalized)
+        }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, normalized) }
             ?: (SortMode.NAME to true)
         _state.value = _state.value.copy(
@@ -143,6 +172,53 @@ class WebDavViewModel : ViewModel() {
             multiSelectMode = false
         )
         refresh()
+    }
+
+    /** 流式读取文本文件 */
+    suspend fun streamDownloadText(
+        path: String,
+        onProgress: (loadedBytes: Long, totalBytes: Long, partialText: String) -> Unit
+    ): String = withContext(Dispatchers.IO) {
+        val acc = _state.value.currentAccount ?: throw IllegalStateException("无有效账户")
+        val resp = repo.download(acc, path)
+        if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}: ${resp.message}")
+        val body = resp.body ?: throw java.io.IOException("响应体为空")
+        val total = body.contentLength()
+        val inputStream = body.byteStream()
+        val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, Charsets.UTF_8))
+        val sb = StringBuilder()
+        val buf = CharArray(16384)
+        var readChars: Int
+        var loadedBytes = 0L
+        var lastReportTime = 0L
+        val maxChars = 2_000_000 // 2MB 保护
+
+        try {
+            while (reader.read(buf).also { readChars = it } != -1) {
+                sb.append(buf, 0, readChars)
+                loadedBytes += readChars
+                val now = System.currentTimeMillis()
+                if (now - lastReportTime > 150) {
+                    lastReportTime = now
+                    onProgress(loadedBytes, total, sb.toString())
+                }
+                if (sb.length > maxChars) {
+                    sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
+                    break
+                }
+            }
+        } finally {
+            body.close()
+        }
+        val full = sb.toString()
+        onProgress(loadedBytes, total, full)
+        full
+    }
+
+    /** 保存文本文件到 WebDAV */
+    suspend fun saveText(path: String, content: String): Boolean = withContext(Dispatchers.IO) {
+        val acc = _state.value.currentAccount ?: return@withContext false
+        repo.upload(acc, path, content.toByteArray(Charsets.UTF_8))
     }
 
     fun toggleSelect(path: String) {

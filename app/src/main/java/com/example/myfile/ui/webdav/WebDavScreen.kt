@@ -10,9 +10,14 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import com.example.myfile.model.ViewMode
+import com.example.myfile.ui.components.FileGridItem
+import com.example.myfile.ui.components.FileCompactItem
+import com.example.myfile.ui.components.TextEditorDialog
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -93,8 +98,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         }
     }
 
-    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
     var pendingScrollRatio by remember { mutableStateOf<Pair<Float, Int>?>(null) }
+
+    val viewMode by vm.viewMode.collectAsState()
+    var showViewModeMenu by remember { mutableStateOf(false) }
+    var showAccountMenu by remember { mutableStateOf(false) }
+    var editingTextEntry by remember { mutableStateOf<FileEntry?>(null) }
 
     LaunchedEffect(state.sortedFiles) {
         pendingScrollRatio?.let { (ratio, offset) ->
@@ -102,7 +112,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             val newTotal = state.sortedFiles.size
             if (newTotal > 0) {
                 val targetIndex = (ratio * newTotal).toInt().coerceIn(0, newTotal - 1)
-                listState.scrollToItem(targetIndex, offset)
+                gridState.scrollToItem(targetIndex, offset)
             }
         }
     }
@@ -115,9 +125,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         if (saved != null) {
             val (idx, off) = saved
             val target = idx.coerceIn(0, (state.sortedFiles.size - 1).coerceAtLeast(0))
-            listState.scrollToItem(target, off)
+            gridState.scrollToItem(target, off)
         } else {
-            listState.scrollToItem(0, 0)
+            gridState.scrollToItem(0, 0)
         }
     }
 
@@ -142,9 +152,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     val totalSpeed by com.example.myfile.core.TrafficMonitor.totalDownloadSpeed.collectAsState()
     val scope = rememberCoroutineScope()
 
+    // 方案B：详细视图(含缩略图和时长) 与 宫格视图 才探查时长与加载缩略图；普通详细视图与简洁视图不探查0流量
+    val shouldLoadMedia = (viewMode == ViewMode.DETAILS_WITH_MEDIA || viewMode == ViewMode.GRID_LARGE || viewMode == ViewMode.GRID_SMALL)
+
     // WebDAV 视频：后台异步探查视频时长（基于轻量 HTTP Range 读取文件头与 moov 索引，0 全量下载）
-    LaunchedEffect(state.files, currentSettings.showVideoDuration) {
-        if (!currentSettings.showVideoDuration) return@LaunchedEffect
+    LaunchedEffect(state.files, shouldLoadMedia) {
+        if (!shouldLoadMedia) return@LaunchedEffect
         val acc = state.currentAccount ?: return@LaunchedEffect
         val videoEntries = state.files.filter { !it.isDirectory && FileOpener.isVideo(it.name) }
         if (videoEntries.isNotEmpty()) {
@@ -240,106 +253,276 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         if (state.multiSelectMode) {
             vm.clearSelection()
         } else {
-            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
             vm.goUp()
         }
     }
 
-    // 面包屑：/a/b/c -> [root, a, b, c]
-    val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
-    // 顶部显示多级目录路径（对齐本地浏览规范）
-    val displayPath = if (state.currentPath.isEmpty() || state.currentPath == "/") "/" else state.currentPath
-
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = displayPath,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        val subtitle = when {
-                            state.currentAccount == null -> "未选择账户"
-                            state.currentAccount!!.isDynamic && state.currentAccount!!.resolvedUrl.isNotBlank() ->
-                                "${state.currentAccount!!.name}  ·  动态连接: ${state.currentAccount!!.resolvedUrl}"
-                            else -> state.currentAccount!!.name
-                        }
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                },
-                navigationIcon = {
-                    if (state.currentPath != "/") {
-                        IconButton(onClick = {
-                            vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                            vm.goUp()
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "上级")
-                        }
-                    }
-                },
-                actions = {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding(),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 左侧：当前配置名胶囊按钮（限制宽度约两个半按钮 ~110dp，点击弹出配置下拉菜单）
                     Box {
-                        IconButton(onClick = { showSortMenu = true }) { Icon(Icons.Filled.Sort, "排序") }
-                        DropdownMenu(
-                            expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false }
+                        Surface(
+                            onClick = { showAccountMenu = true },
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.height(34.dp)
                         ) {
-                            listOf(
-                                Triple(SortMode.NAME, true, "名称 ↑"),
-                                Triple(SortMode.NAME, false, "名称 ↓"),
-                                Triple(SortMode.SIZE, true, "大小 ↑"),
-                                Triple(SortMode.SIZE, false, "大小 ↓"),
-                                Triple(SortMode.MODIFIED, true, "时间 ↑"),
-                                Triple(SortMode.MODIFIED, false, "时间 ↓"),
-                                Triple(SortMode.TYPE, true, "类型 ↑"),
-                                Triple(SortMode.TYPE, false, "类型 ↓")
-                            ).forEach { (mode, asc, label) ->
-                                val isSelected = state.sortMode == mode && state.sortAsc == asc
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = state.currentAccount?.name ?: "选择配置",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 110.dp)
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Filled.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showAccountMenu,
+                            onDismissRequest = { showAccountMenu = false }
+                        ) {
+                            state.accounts.forEach { acc ->
+                                val isSelected = acc.id == state.currentAccount?.id
                                 DropdownMenuItem(
                                     text = {
-                                        Text(
-                                            text = label,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (acc.isDynamic) {
+                                                Icon(
+                                                    Icons.Filled.SyncAlt,
+                                                    contentDescription = "动态解析",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                            }
+                                            Text(
+                                                text = acc.name,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     },
                                     leadingIcon = if (isSelected) {
                                         { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
                                     } else null,
+                                    trailingIcon = {
+                                        Row {
+                                            IconButton(
+                                                onClick = {
+                                                    showAccountMenu = false
+                                                    editingAccount = acc
+                                                    showAccountDialog = true
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(Icons.Filled.Edit, "编辑", modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    showAccountMenu = false
+                                                    vm.deleteAccount(acc)
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(Icons.Filled.Delete, "删除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                                            }
+                                        }
+                                    },
                                     onClick = {
-                                        val curIndex = listState.firstVisibleItemIndex
-                                        val curOffset = listState.firstVisibleItemScrollOffset
-                                        val curTotal = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
-                                        pendingScrollRatio = (curIndex.toFloat() / curTotal) to curOffset
-                                        showSortMenu = false
-                                        vm.setSort(mode, asc)
+                                        showAccountMenu = false
+                                        vm.selectAccount(acc)
                                     }
                                 )
                             }
+
+                            HorizontalDivider()
+
+                            // 配置名下拉列表最下面是添加配置
+                            DropdownMenuItem(
+                                text = { Text("+ 添加配置", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) },
+                                leadingIcon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
+                                onClick = {
+                                    showAccountMenu = false
+                                    editingAccount = null
+                                    showAccountDialog = true
+                                }
+                            )
                         }
                     }
-                    IconButton(onClick = { showTrafficDebug = true }) {
-                        BadgedBox(
-                            badge = {
-                                if (activeTransfers.isNotEmpty()) {
-                                    Badge { Text("${activeTransfers.size}") }
+
+                    // 中间：若非根目录，紧凑展示当前子路径（点击可直接回退上级）
+                    if (state.currentPath != "/") {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = state.currentPath,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clickable {
+                                    vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                    vm.goUp()
+                                }
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    // 右侧紧凑操作按钮（高度统一 36dp 紧凑排列）
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(1.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 1. 视图模式切换按钮
+                        Box {
+                            IconButton(
+                                onClick = { showViewModeMenu = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = viewMode.icon,
+                                    contentDescription = "切换视图",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showViewModeMenu,
+                                onDismissRequest = { showViewModeMenu = false }
+                            ) {
+                                ViewMode.values().forEach { mode ->
+                                    val isSelected = mode == viewMode
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = mode.title,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = mode.icon,
+                                                contentDescription = null,
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        },
+                                        trailingIcon = if (isSelected) {
+                                            { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                                        } else null,
+                                        onClick = {
+                                            showViewModeMenu = false
+                                            vm.setViewMode(mode)
+                                        }
+                                    )
                                 }
                             }
+                        }
+
+                        // 2. 排序按钮
+                        Box {
+                            IconButton(
+                                onClick = { showSortMenu = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Filled.Sort, "排序", modifier = Modifier.size(20.dp))
+                            }
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                listOf(
+                                    Triple(SortMode.NAME, true, "名称 ↑"),
+                                    Triple(SortMode.NAME, false, "名称 ↓"),
+                                    Triple(SortMode.SIZE, true, "大小 ↑"),
+                                    Triple(SortMode.SIZE, false, "大小 ↓"),
+                                    Triple(SortMode.MODIFIED, true, "时间 ↑"),
+                                    Triple(SortMode.MODIFIED, false, "时间 ↓"),
+                                    Triple(SortMode.TYPE, true, "类型 ↑"),
+                                    Triple(SortMode.TYPE, false, "类型 ↓")
+                                ).forEach { (mode, asc, label) ->
+                                    val isSelected = state.sortMode == mode && state.sortAsc == asc
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = label,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        leadingIcon = if (isSelected) {
+                                            { Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                                        } else null,
+                                        onClick = {
+                                            val curIndex = gridState.firstVisibleItemIndex
+                                            val curOffset = gridState.firstVisibleItemScrollOffset
+                                            val curTotal = gridState.layoutInfo.totalItemsCount.coerceAtLeast(1)
+                                            pendingScrollRatio = (curIndex.toFloat() / curTotal) to curOffset
+                                            showSortMenu = false
+                                            vm.setSort(mode, asc)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // 3. 网络传输监控
+                        IconButton(
+                            onClick = { showTrafficDebug = true },
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(Icons.Filled.Speed, "网络传输监控")
+                            BadgedBox(
+                                badge = {
+                                    if (activeTransfers.isNotEmpty()) {
+                                        Badge { Text("${activeTransfers.size}") }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Filled.Speed, "网络传输监控", modifier = Modifier.size(20.dp))
+                            }
+                        }
+
+                        // 4. 刷新按钮
+                        IconButton(
+                            onClick = { vm.refresh() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Filled.Refresh, "刷新", modifier = Modifier.size(20.dp))
                         }
                     }
-                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, "刷新") }
                 }
-            )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
@@ -390,181 +573,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // 账户 Chip 列
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                state.accounts.forEach { acc ->
-                    var showAccMenu by remember(acc.id) { mutableStateOf(false) }
-                    val selected = acc.id == state.currentAccount?.id
-                    Box {
-                        Surface(
-                            modifier = Modifier.combinedClickable(
-                                onClick = { vm.selectAccount(acc) },
-                                onLongClick = { showAccMenu = true }
-                            ),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (acc.isDynamic) {
-                                    Icon(
-                                        Icons.Filled.SyncAlt,
-                                        contentDescription = "动态解析",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                }
-                                Text(
-                                    acc.name,
-                                    color = if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showAccMenu,
-                            onDismissRequest = { showAccMenu = false }
-                        ) {
-                            if (acc.isDynamic) {
-                                DropdownMenuItem(
-                                    text = { Text("重新获取真实地址") },
-                                    leadingIcon = { Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)) },
-                                    onClick = {
-                                        showAccMenu = false
-                                        vm.reResolveAccount(acc)
-                                    }
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("编辑") },
-                                onClick = {
-                                    showAccMenu = false
-                                    editingAccount = acc
-                                    showAccountDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("删除") },
-                                onClick = {
-                                    showAccMenu = false
-                                    vm.deleteAccount(acc)
-                                }
-                            )
-                        }
-                    }
-                }
-                AssistChip(
-                    onClick = { editingAccount = null; showAccountDialog = true },
-                    label = { Text("+ 添加") },
-                    leadingIcon = { Icon(Icons.Filled.Add, null, Modifier.size(18.dp)) }
-                )
-            }
-
-            // 面包屑路径栏：采用微胶囊风格与平滑横向滚动
-            if (state.currentAccount != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .horizontalScroll(rememberScrollState()),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            crumbs.forEachIndexed { index, crumb ->
-                                if (index > 0) {
-                                    Text(
-                                        text = "›",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.padding(horizontal = 2.dp)
-                                    )
-                                }
-                                val isCurrent = index == crumbs.lastIndex
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable {
-                                            if (!isCurrent) {
-                                                vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                                                vm.navigateTo(crumb.path)
-                                            }
-                                        }
-                                ) {
-                                    Text(
-                                        text = crumb.name,
-                                        color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // 实时网络速率小徽章（有网速或活跃传输时显示，点击秒开 Debug 监控面板）
-                        if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier
-                                    .padding(start = 6.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable { showTrafficDebug = true }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Speed,
-                                        contentDescription = "实时网速",
-                                        modifier = Modifier.size(13.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = "${com.example.myfile.ui.components.formatSpeed(totalSpeed)} (${activeTransfers.size})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             if (state.currentAccount == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.CloudOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
-                        Text("点击上方「+ 添加」配置 WebDAV 账户", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("点击左上方「选择配置」添加或选择 WebDAV 账户", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else if (state.loading && state.files.isEmpty()) {
@@ -601,281 +615,379 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             Text("此文件夹为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
-                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                        // 响应式宫格布局：详细视图与简洁视图窄屏 1 列，宽屏自适应多列；宫格视图多列排列
+                        val gridCells = when (viewMode) {
+                            ViewMode.DETAILS_NO_MEDIA, ViewMode.DETAILS_WITH_MEDIA -> GridCells.Adaptive(minSize = 340.dp)
+                            ViewMode.GRID_LARGE -> GridCells.Adaptive(minSize = 105.dp)
+                            ViewMode.GRID_SMALL -> GridCells.Adaptive(minSize = 80.dp)
+                            ViewMode.COMPACT -> GridCells.Adaptive(minSize = 300.dp)
+                        }
+
+                        LazyVerticalGrid(
+                            columns = gridCells,
+                            state = gridState,
+                            contentPadding = when (viewMode) {
+                                ViewMode.GRID_LARGE, ViewMode.GRID_SMALL -> PaddingValues(8.dp)
+                                ViewMode.COMPACT -> PaddingValues(vertical = 4.dp)
+                                else -> PaddingValues(0.dp)
+                            },
+                            horizontalArrangement = when (viewMode) {
+                                ViewMode.GRID_LARGE, ViewMode.GRID_SMALL -> Arrangement.spacedBy(8.dp)
+                                else -> Arrangement.spacedBy(0.dp)
+                            },
+                            verticalArrangement = when (viewMode) {
+                                ViewMode.GRID_LARGE, ViewMode.GRID_SMALL -> Arrangement.spacedBy(8.dp)
+                                else -> Arrangement.spacedBy(0.dp)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        ) {
                             items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
-                        val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
-                        val fullUrl = base + p
-                        val category = FileOpener.fileCategory(entry.name)
-                        val videoKey = acc?.let { "acc_${it.id}$p" } ?: entry.path
+                                val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
+                                val fullUrl = base + p
+                                val category = FileOpener.fileCategory(entry.name)
+                                val videoKey = acc?.let { "acc_${it.id}$p" } ?: entry.path
+                                val vProg = progressMap[videoKey]
 
-                        // 打开文件：先尝试 myfile 记录的默认程序，无则弹「打开方式」对话框
-                        fun openEntry(forceChooser: Boolean) {
-                            if (acc == null) return
-                            scope.launch {
-                                val appCtx = context.applicationContext
-                                val isVid = FileOpener.isVideo(entry.name)
-                                val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
-                                val ext = entry.name.substringAfterLast('.', "").lowercase()
-
-                                val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
-                                    MyApp.instance.downloadManager.startStreamingRename(acc, entry.path) ?: entry.path
-                                } else {
-                                    entry.path
-                                }
-
-                                var intent = if (isVid) {
-                                    FileOpener.buildVideoStreamIntent(
-                                        client = com.example.myfile.MyApp.instance.okHttpClient,
-                                        account = acc,
-                                        remotePath = streamRemotePath,
-                                        fileName = entry.name,
-                                        fakeAvi = fakeAvi,
-                                        originalPath = entry.path
-                                    )
-                                } else {
-                                    val tmp = FileOpener.downloadToCache(
-                                        client = com.example.myfile.MyApp.instance.okHttpClient,
-                                        authHeader = auth ?: "",
-                                        url = fullUrl,
-                                        fileName = entry.name
-                                    ) ?: return@launch
-                                    FileOpener.buildLocalViewIntent(appCtx, tmp)
-                                }
-                                if (intent == null) {
-                                    if (isVid && fakeAvi && streamRemotePath != entry.path) {
-                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                // 方案B：详细视图(含缩略图和时长) 和 宫格视图 加载缩略图；其他模式不加载节约流量
+                                val thumbUrl = if (!entry.isDirectory && shouldLoadMedia) {
+                                    if ((category == "image" || category == "apk") && acc != null) {
+                                        com.example.myfile.core.WebDavThumbRequest(acc, entry)
+                                    } else if (category == "video" && acc != null) {
+                                        com.example.myfile.core.WebDavThumbRequest(acc, entry)
+                                    } else {
+                                        fullUrl
                                     }
-                                    return@launch
-                                }
+                                } else null
 
-                                // 视频流式意图若找不到可处理的播放器（http scheme 匹配太严），
-                                // 回退为下载到缓存后用 content:// 打开
-                                var candidates = FileOpener.resolveCandidates(appCtx, intent)
-                                if (candidates.isEmpty() && isVid) {
-                                    if (fakeAvi && streamRemotePath != entry.path) {
-                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
-                                    }
-                                    val tmp = FileOpener.downloadToCache(
-                                        client = com.example.myfile.MyApp.instance.okHttpClient,
-                                        authHeader = auth ?: "",
-                                        url = fullUrl,
-                                        fileName = entry.name
-                                    )
-                                    if (tmp != null) {
-                                        FileOpener.buildLocalViewIntent(appCtx, tmp)?.let {
-                                            intent = it
-                                            candidates = FileOpener.resolveCandidates(appCtx, it)
+                                val durMs = if (shouldLoadMedia) vProg?.durationMs else null
+                                val posMs = if (shouldLoadMedia) vProg?.positionMs else null
+
+                                // 打开文件逻辑
+                                fun openEntry(forceChooser: Boolean) {
+                                    if (acc == null) return
+                                    scope.launch {
+                                        val appCtx = context.applicationContext
+                                        val isVid = FileOpener.isVideo(entry.name)
+                                        val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
+                                        val ext = entry.name.substringAfterLast('.', "").lowercase()
+
+                                        val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
+                                            MyApp.instance.downloadManager.startStreamingRename(acc, entry.path) ?: entry.path
+                                        } else {
+                                            entry.path
                                         }
-                                    }
-                                }
 
-                                val finalIntent = intent ?: return@launch
-                                val finalCandidates = candidates
-
-                                if (category == "video") {
-                                    val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
-                                    if (saved != null && saved.positionMs > 1000L) {
-                                        finalIntent.putExtra("position", saved.positionMs.toInt())
-                                        finalIntent.putExtra("position_ms", saved.positionMs)
-                                        finalIntent.putExtra("extra_position", saved.positionMs)
-                                        finalIntent.putExtra("time", (saved.positionMs / 1000).toInt())
-                                        finalIntent.putExtra("from_start", false)
-                                    }
-                                    finalIntent.putExtra("return_result", true)
-                                }
-
-                                // 有默认程序且非「打开为」→ 直接用默认程序打开
-                                val defaultApp = MyApp.instance.defaultAppStore.get(category)
-                                if (!forceChooser && defaultApp != null) {
-                                    val parts = defaultApp.split('/')
-                                    if (parts.size == 2) {
-                                        val explicit = Intent(finalIntent).apply {
-                                            component = ComponentName(parts[0], parts[1])
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                        var intent = if (isVid) {
+                                            FileOpener.buildVideoStreamIntent(
+                                                client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                account = acc,
+                                                remotePath = streamRemotePath,
+                                                fileName = entry.name,
+                                                fakeAvi = fakeAvi,
+                                                originalPath = entry.path
+                                            )
+                                        } else {
+                                            val tmp = FileOpener.downloadToCache(
+                                                client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                authHeader = auth ?: "",
+                                                url = fullUrl,
+                                                fileName = entry.name
+                                            ) ?: return@launch
+                                            FileOpener.buildLocalViewIntent(appCtx, tmp)
                                         }
-                                        currentWatchingVideoKey = if (category == "video") videoKey else null
-                                        try {
-                                            externalLauncher.launch(explicit)
-                                            return@launch
-                                        } catch (_: Exception) {
+                                        if (intent == null) {
                                             if (isVid && fakeAvi && streamRemotePath != entry.path) {
                                                 MyApp.instance.downloadManager.finishStreamingRename(entry.path)
                                             }
+                                            return@launch
+                                        }
+
+                                        var candidates = FileOpener.resolveCandidates(appCtx, intent)
+                                        if (candidates.isEmpty() && isVid) {
+                                            if (fakeAvi && streamRemotePath != entry.path) {
+                                                MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                            }
+                                            val tmp = FileOpener.downloadToCache(
+                                                client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                authHeader = auth ?: "",
+                                                url = fullUrl,
+                                                fileName = entry.name
+                                            )
+                                            if (tmp != null) {
+                                                FileOpener.buildLocalViewIntent(appCtx, tmp)?.let {
+                                                    intent = it
+                                                    candidates = FileOpener.resolveCandidates(appCtx, it)
+                                                }
+                                            }
+                                        }
+
+                                        val finalIntent = intent ?: return@launch
+                                        val finalCandidates = candidates
+
+                                        if (category == "video") {
+                                            val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
+                                            if (saved != null && saved.positionMs > 1000L) {
+                                                finalIntent.putExtra("position", saved.positionMs.toInt())
+                                                finalIntent.putExtra("position_ms", saved.positionMs)
+                                                finalIntent.putExtra("extra_position", saved.positionMs)
+                                                finalIntent.putExtra("time", (saved.positionMs / 1000).toInt())
+                                                finalIntent.putExtra("from_start", false)
+                                            }
+                                            finalIntent.putExtra("return_result", true)
+                                        }
+
+                                        val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                        if (!forceChooser && defaultApp != null) {
+                                            val parts = defaultApp.split('/')
+                                            if (parts.size == 2) {
+                                                val explicit = Intent(finalIntent).apply {
+                                                    component = ComponentName(parts[0], parts[1])
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                }
+                                                currentWatchingVideoKey = if (category == "video") videoKey else null
+                                                try {
+                                                    externalLauncher.launch(explicit)
+                                                    return@launch
+                                                } catch (_: Exception) {
+                                                    if (isVid && fakeAvi && streamRemotePath != entry.path) {
+                                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        openWithRequest = OpenWithRequest(
+                                            entry = entry,
+                                            category = category,
+                                            videoKey = videoKey,
+                                            intent = finalIntent,
+                                            candidates = finalCandidates
+                                        )
+                                    }
+                                }
+
+                                val onItemClick = {
+                                    if (state.multiSelectMode) {
+                                        vm.toggleSelect(entry.path)
+                                    } else if (entry.isDirectory) {
+                                        vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                        vm.open(entry)
+                                    } else if (category == "apk") {
+                                        if (acc != null) {
+                                            scope.launch {
+                                                try {
+                                                    com.example.myfile.core.download.DownloadService.start(MyApp.instance)
+                                                    val dir = File(
+                                                        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                        "myfile"
+                                                    )
+                                                    if (!dir.exists()) dir.mkdirs()
+                                                    val taskId = MyApp.instance.downloadManager.startDownload(
+                                                        acc,
+                                                        entry.path,
+                                                        entry.name,
+                                                        dir,
+                                                        knownSize = entry.size
+                                                    )
+                                                    downloadingApkFileName = entry.name
+                                                    downloadingApkTaskId = taskId
+                                                } catch (e: Exception) {
+                                                    snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                    } else if (category == "image") {
+                                        val idx = imageEntries.indexOfFirst { it.path == entry.path }
+                                        if (idx >= 0) viewingImageIndex = idx
+                                        else openEntry(forceChooser = false)
+                                    } else if (FileOpener.isText(entry.name)) {
+                                        // 内置文本浏览和编辑器
+                                        editingTextEntry = entry
+                                    } else {
+                                        openEntry(forceChooser = false)
+                                    }
+                                }
+
+                                val onItemLongClick = {
+                                    vm.toggleSelect(entry.path)
+                                }
+
+                                // 更多操作下拉菜单
+                                val trailingMenu: @Composable () -> Unit = {
+                                    if (!state.multiSelectMode) {
+                                        var showMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            IconButton(
+                                                onClick = { showMenu = true },
+                                                modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.MoreVert,
+                                                    contentDescription = "更多",
+                                                    modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 18.dp else 22.dp)
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = showMenu,
+                                                onDismissRequest = { showMenu = false }
+                                            ) {
+                                                if (!entry.isDirectory) {
+                                                    if (FileOpener.isText(entry.name)) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("编辑文本") },
+                                                            leadingIcon = { Icon(Icons.Filled.EditNote, null) },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                editingTextEntry = entry
+                                                            }
+                                                        )
+                                                    }
+                                                    DropdownMenuItem(
+                                                        text = { Text("打开为…") },
+                                                        leadingIcon = { Icon(Icons.Filled.OpenInNew, null) },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            openEntry(forceChooser = true)
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("加速下载") },
+                                                        leadingIcon = { Icon(Icons.Filled.Download, null) },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            state.currentAccount?.let { a ->
+                                                                vm.downloadFile(a, entry)
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                                DropdownMenuItem(
+                                                    text = { Text("重命名") },
+                                                    leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        renamingEntry = entry
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("属性") },
+                                                    leadingIcon = { Icon(Icons.Filled.Info, null) },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        propertiesEntry = entry
+                                                    }
+                                                )
+                                                HorizontalDivider()
+                                                DropdownMenuItem(
+                                                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                                                    leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        deletingEntry = entry
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
 
-                                // 弹「打开方式」选择对话框
-                                openWithRequest = OpenWithRequest(
-                                    entry = entry,
-                                    category = category,
-                                    videoKey = videoKey,
-                                    intent = finalIntent,
-                                    candidates = finalCandidates
-                                )
+                                when (viewMode) {
+                                    ViewMode.DETAILS_NO_MEDIA, ViewMode.DETAILS_WITH_MEDIA -> {
+                                        Column {
+                                            FileListItem(
+                                                entry = entry,
+                                                thumbnailUrl = thumbUrl,
+                                                thumbnailAuth = auth,
+                                                thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
+                                                videoProgress = vProg?.let {
+                                                    if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
+                                                },
+                                                videoDurationMs = durMs,
+                                                videoPositionMs = posMs,
+                                                isSelected = entry.path in state.selected,
+                                                onClick = onItemClick,
+                                                onLongClick = onItemLongClick,
+                                                trailing = trailingMenu
+                                            )
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 74.dp),
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                            )
+                                        }
+                                    }
+                                    ViewMode.GRID_LARGE -> {
+                                        FileGridItem(
+                                            entry = entry,
+                                            onClick = onItemClick,
+                                            onLongClick = onItemLongClick,
+                                            isSelected = entry.path in state.selected,
+                                            thumbnailUrl = thumbUrl,
+                                            thumbnailAuth = auth,
+                                            thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
+                                            videoDurationMs = durMs,
+                                            videoPositionMs = posMs,
+                                            isLarge = true,
+                                            trailing = trailingMenu
+                                        )
+                                    }
+                                    ViewMode.GRID_SMALL -> {
+                                        FileGridItem(
+                                            entry = entry,
+                                            onClick = onItemClick,
+                                            onLongClick = onItemLongClick,
+                                            isSelected = entry.path in state.selected,
+                                            thumbnailUrl = thumbUrl,
+                                            thumbnailAuth = auth,
+                                            thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
+                                            videoDurationMs = durMs,
+                                            videoPositionMs = posMs,
+                                            isLarge = false,
+                                            trailing = trailingMenu
+                                        )
+                                    }
+                                    ViewMode.COMPACT -> {
+                                        FileCompactItem(
+                                            entry = entry,
+                                            onClick = onItemClick,
+                                            onLongClick = onItemLongClick,
+                                            isSelected = entry.path in state.selected,
+                                            trailing = trailingMenu
+                                        )
+                                    }
+                                }
                             }
                         }
-                        val vProg = progressMap[videoKey]
-                        FileListItem(
-                            entry = entry,
-                            thumbnailUrl = if (!entry.isDirectory) {
-                                if ((category == "image" || category == "apk") && acc != null) {
-                                    com.example.myfile.core.WebDavThumbRequest(acc, entry)
-                                } else if (category == "video" && acc != null) {
-                                    if (currentSettings.loadRemoteVideoThumbnails) {
-                                        com.example.myfile.core.WebDavThumbRequest(acc, entry)
-                                    } else {
-                                        null
-                                    }
+                    }
+
+                    if (pullRefreshState.verticalOffset > 0.5f || pullRefreshState.isRefreshing) {
+                        PullToRefreshContainer(
+                            state = pullRefreshState,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                            indicator = { s ->
+                                val rot = if (s.isRefreshing) {
+                                    refreshRotation.value
                                 } else {
-                                    fullUrl
+                                    (s.verticalOffset * 5f) % 360f
                                 }
-                            } else null,
-                            thumbnailAuth = auth,
-                            thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
-                            videoProgress = vProg?.let {
-                                if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null
-                            },
-                            videoDurationMs = if (currentSettings.showVideoDuration) vProg?.durationMs else null,
-                            videoPositionMs = if (currentSettings.showVideoDuration) vProg?.positionMs else null,
-                            isSelected = entry.path in state.selected,
-                            onClick = {
-                                if (state.multiSelectMode) {
-                                    vm.toggleSelect(entry.path)
-                                } else if (entry.isDirectory) {
-                                    vm.saveScrollPosition(state.currentPath, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                                    vm.open(entry)
-                                } else if (category == "apk") {
-                                    if (acc != null) {
-                                        scope.launch {
-                                            try {
-                                                com.example.myfile.core.download.DownloadService.start(MyApp.instance)
-                                                val dir = File(
-                                                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                                                    "myfile"
-                                                )
-                                                if (!dir.exists()) dir.mkdirs()
-                                                val taskId = MyApp.instance.downloadManager.startDownload(
-                                                    acc,
-                                                    entry.path,
-                                                    entry.name,
-                                                    dir,
-                                                    knownSize = entry.size
-                                                )
-                                                downloadingApkFileName = entry.name
-                                                downloadingApkTaskId = taskId
-                                            } catch (e: Exception) {
-                                                snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
-                                            }
-                                        }
-                                    }
-                                } else if (category == "image") {
-                                    val idx = imageEntries.indexOfFirst { it.path == entry.path }
-                                    if (idx >= 0) viewingImageIndex = idx
-                                    else openEntry(forceChooser = false)
-                                } else {
-                                    openEntry(forceChooser = false)
-                                }
-                            },
-                            onLongClick = { vm.toggleSelect(entry.path) },
-                            trailing = {
-                                if (!state.multiSelectMode) {
-                                    var showMenu by remember { mutableStateOf(false) }
-                                    Box {
-                                        IconButton(onClick = { showMenu = true }) {
-                                            Icon(Icons.Filled.MoreVert, "更多")
-                                        }
-                                        DropdownMenu(
-                                            expanded = showMenu,
-                                            onDismissRequest = { showMenu = false }
-                                        ) {
-                                            if (!entry.isDirectory) {
-                                                DropdownMenuItem(
-                                                    text = { Text("打开为…") },
-                                                    leadingIcon = { Icon(Icons.Filled.OpenInNew, null) },
-                                                    onClick = {
-                                                        showMenu = false
-                                                        openEntry(forceChooser = true)
-                                                    }
-                                                )
-                                                DropdownMenuItem(
-                                                    text = { Text("加速下载") },
-                                                    leadingIcon = { Icon(Icons.Filled.Download, null) },
-                                                    onClick = {
-                                                        showMenu = false
-                                                        state.currentAccount?.let { a ->
-                                                            vm.downloadFile(a, entry)
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                            DropdownMenuItem(
-                                                text = { Text("重命名") },
-                                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                                                onClick = {
-                                                    showMenu = false
-                                                    renamingEntry = entry
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("属性") },
-                                                leadingIcon = { Icon(Icons.Filled.Info, null) },
-                                                onClick = {
-                                                    showMenu = false
-                                                    propertiesEntry = entry
-                                                }
-                                            )
-                                            HorizontalDivider()
-                                            DropdownMenuItem(
-                                                text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                                                leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                                                onClick = {
-                                                    showMenu = false
-                                                    deletingEntry = entry
-                                                }
-                                            )
-                                        }
-                                    }
+                                Box(
+                                    modifier = Modifier.size(40.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Refresh,
+                                        contentDescription = "刷新",
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .graphicsLayer { rotationZ = rot },
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
-                        )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 74.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                         )
                     }
                 }
             }
-
-            if (pullRefreshState.verticalOffset > 0.5f || pullRefreshState.isRefreshing) {
-                PullToRefreshContainer(
-                    state = pullRefreshState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    indicator = { s ->
-                        val rot = if (s.isRefreshing) {
-                            refreshRotation.value
-                        } else {
-                            (s.verticalOffset * 5f) % 360f
-                        }
-                        Box(
-                            modifier = Modifier.size(40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Refresh,
-                                contentDescription = "刷新",
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .graphicsLayer { rotationZ = rot },
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                )
-            }
-        }
-    }
         }
     }
 
@@ -1034,6 +1146,21 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             onConfirm = {
                 vm.deleteSelected()
             }
+        )
+    }
+
+    // 内置文本浏览和编辑器
+    editingTextEntry?.let { entry ->
+        TextEditorDialog(
+            fileName = entry.name,
+            filePath = entry.path,
+            onLoad = { onProgress ->
+                vm.streamDownloadText(entry.path, onProgress)
+            },
+            onSave = { newText ->
+                vm.saveText(entry.path, newText)
+            },
+            onDismiss = { editingTextEntry = null }
         )
     }
 }
