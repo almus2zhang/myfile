@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,25 +74,32 @@ fun FileGridItem(
                     visualType == VisualType.APK
                 )
 
+                val isApk = visualType == VisualType.APK
+                val cKey = thumbnailKey ?: "thumb_${entry.path}"
+                var isLoaded by remember(thumbnailUrl, cKey) { mutableStateOf(false) }
+
                 Box(
                     modifier = Modifier
                         .size(iconBoxSize)
-                        .clip(RoundedCornerShape(if (visualType == VisualType.APK) 10.dp else 8.dp))
+                        .clip(RoundedCornerShape(if (isApk) 10.dp else 8.dp))
                         .background(
-                            if (hasThumbnail && thumbnailUrl != null) MaterialTheme.colorScheme.surfaceVariant
+                            if (isApk) {
+                                if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.15f)
+                            } else if (hasThumbnail && thumbnailUrl != null) MaterialTheme.colorScheme.surfaceVariant
                             else visualType.tintColor.copy(alpha = 0.15f)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = visualType.icon,
-                        contentDescription = null,
-                        tint = visualType.tintColor,
-                        modifier = Modifier.size(iconSize)
-                    )
+                    if (!isLoaded) {
+                        Icon(
+                            imageVector = visualType.icon,
+                            contentDescription = null,
+                            tint = visualType.tintColor,
+                            modifier = Modifier.size(iconSize)
+                        )
+                    }
 
                     if (hasThumbnail && thumbnailUrl != null) {
-                        val cKey = thumbnailKey ?: "thumb_${entry.path}"
                         AsyncImage(
                             model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                 .data(thumbnailUrl)
@@ -105,8 +112,12 @@ fun FileGridItem(
                                 .crossfade(true)
                                 .build(),
                             contentDescription = entry.name,
-                            contentScale = if (visualType == VisualType.APK) ContentScale.Fit else ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                            onSuccess = { isLoaded = true },
+                            onError = { isLoaded = false },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(if (isApk) 2.dp else 0.dp)
                         )
                     }
 

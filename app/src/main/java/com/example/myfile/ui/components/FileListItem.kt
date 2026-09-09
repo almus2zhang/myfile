@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,24 +72,28 @@ fun FileListItem(
         if (hasThumbnail && thumbnailUrl != null) {
             val isApk = visualType == VisualType.APK
             val cKey = thumbnailKey ?: "thumb_${entry.path}"
+            var isLoaded by remember(thumbnailUrl, cKey) { mutableStateOf(false) }
 
             Box(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
                     .background(
-                        if (isApk) visualType.tintColor.copy(alpha = 0.14f)
-                        else MaterialTheme.colorScheme.surfaceVariant
+                        if (isApk) {
+                            if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.14f)
+                        } else MaterialTheme.colorScheme.surfaceVariant
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                // 底层：默认彩色类别图标（加载中或失败时显示）
-                Icon(
-                    imageVector = visualType.icon,
-                    contentDescription = null,
-                    tint = visualType.tintColor,
-                    modifier = Modifier.size(26.dp)
-                )
+                // 仅在未加载成功时显示底层默认彩色类别图标（加载中或失败时显示，避免与真实图标重叠）
+                if (!isLoaded) {
+                    Icon(
+                        imageVector = visualType.icon,
+                        contentDescription = null,
+                        tint = visualType.tintColor,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
 
                 // 顶层：Coil 异步加载图片、视频与 APK 真实缩略图
                 AsyncImage(
@@ -107,10 +111,12 @@ fun FileListItem(
                         .build(),
                     contentDescription = entry.name,
                     contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                    onSuccess = { isLoaded = true },
+                    onError = { isLoaded = false },
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
-                        .padding(if (isApk) 4.dp else 0.dp)
+                        .padding(if (isApk) 2.dp else 0.dp)
                 )
 
                 // 柔和微边框，增强在浅色/深色背景下的视觉边界感
