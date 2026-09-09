@@ -34,6 +34,7 @@ fun DebugTrafficDialog(
 ) {
     val activeTransfers by TrafficMonitor.activeTransfers.collectAsState()
     val recentTransfers by TrafficMonitor.recentTransfers.collectAsState()
+    val debugLogs by TrafficMonitor.debugLogs.collectAsState()
     val totalSpeed by TrafficMonitor.totalDownloadSpeed.collectAsState()
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -44,9 +45,9 @@ fun DebugTrafficDialog(
     ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(20.dp),
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.88f),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
@@ -77,7 +78,7 @@ fun DebugTrafficDialog(
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                "实时网络传输监视器",
+                                "实时网络传输监视器 v1.1.5",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -160,8 +161,18 @@ fun DebugTrafficDialog(
                         onClick = { selectedTab = 1 },
                         text = {
                             Text(
-                                "历史记录 (${recentTransfers.size})",
+                                "传输历史 (${recentTransfers.size})",
                                 fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    )
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = {
+                            Text(
+                                "调试日志 (${debugLogs.size})",
+                                fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal
                             )
                         }
                     )
@@ -169,15 +180,18 @@ fun DebugTrafficDialog(
 
                 // 4. 列表内容
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (selectedTab == 0) {
-                        ActiveTransfersList(
+                    when (selectedTab) {
+                        0 -> ActiveTransfersList(
                             transfers = activeTransfers,
                             onCancel = { TrafficMonitor.cancelTransfer(it) }
                         )
-                    } else {
-                        RecentTransfersList(
+                        1 -> RecentTransfersList(
                             transfers = recentTransfers,
                             onClear = { TrafficMonitor.clearHistory() }
+                        )
+                        2 -> DebugLogsList(
+                            logs = debugLogs,
+                            onClear = { TrafficMonitor.clearDebugLogs() }
                         )
                     }
                 }
@@ -504,3 +518,65 @@ private fun RecentTransferItem(record: TrafficRecord) {
         }
     }
 }
+
+@Composable
+private fun DebugLogsList(
+    logs: List<String>,
+    onClear: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "显示内部流程与默认应用调试事件 (${logs.size})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (logs.isNotEmpty()) {
+                TextButton(onClick = onClear, contentPadding = PaddingValues(0.dp)) {
+                    Text("清空日志", fontSize = 12.sp)
+                }
+            }
+        }
+
+        if (logs.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "暂无调试日志",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            return
+        }
+
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items(logs.size) { idx ->
+                val log = logs[idx]
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                ) {
+                    Text(
+                        text = log,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+    }
+}
+

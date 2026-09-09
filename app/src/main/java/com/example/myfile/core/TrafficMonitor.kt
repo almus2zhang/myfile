@@ -69,6 +69,9 @@ object TrafficMonitor {
     private val _recentTransfers = MutableStateFlow<List<TrafficRecord>>(emptyList())
     val recentTransfers: StateFlow<List<TrafficRecord>> = _recentTransfers.asStateFlow()
 
+    private val _debugLogs = MutableStateFlow<List<String>>(listOf("系统初始化完成"))
+    val debugLogs: StateFlow<List<String>> = _debugLogs.asStateFlow()
+
     private val _totalDownloadSpeed = MutableStateFlow(0L)
     val totalDownloadSpeed: StateFlow<Long> = _totalDownloadSpeed.asStateFlow()
 
@@ -124,21 +127,38 @@ object TrafficMonitor {
     }
 
     fun clearHistory() {
-        _recentTransfers.value = emptyList()
+        synchronized(this) {
+            _recentTransfers.value = emptyList()
+        }
+    }
+
+    fun clearDebugLogs() {
+        synchronized(this) {
+            _debugLogs.value = emptyList()
+        }
     }
 
     fun debug(msg: String) {
-        val record = TrafficRecord(
-            id = idCounter.getAndIncrement(),
-            method = "DBG",
-            url = msg,
-            displayUrl = msg,
-            category = "[调试]",
-            status = TransferState.COMPLETED
-        ).also { it.endTime = System.currentTimeMillis() }
-        val cur = _recentTransfers.value.toMutableList()
-        cur.add(0, record)
-        _recentTransfers.value = if (cur.size > 50) cur.take(50) else cur
+        val timeStr = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+        val formattedMsg = "[$timeStr] $msg"
+        android.util.Log.d("MyFileDebug", formattedMsg)
+        synchronized(this) {
+            val curLogs = _debugLogs.value.toMutableList()
+            curLogs.add(0, formattedMsg)
+            _debugLogs.value = if (curLogs.size > 200) curLogs.take(200) else curLogs
+
+            val record = TrafficRecord(
+                id = idCounter.getAndIncrement(),
+                method = "DBG",
+                url = formattedMsg,
+                displayUrl = formattedMsg,
+                category = "[调试]",
+                status = TransferState.COMPLETED
+            ).also { it.endTime = System.currentTimeMillis() }
+            val cur = _recentTransfers.value.toMutableList()
+            cur.add(0, record)
+            _recentTransfers.value = if (cur.size > 100) cur.take(100) else cur
+        }
     }
 
     fun cancelTransfer(id: Long) {

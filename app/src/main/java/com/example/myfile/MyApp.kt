@@ -157,6 +157,8 @@ class MyApp : Application(), ImageLoaderFactory {
             },
             settingsProvider = { _currentSettings.value }
         )
+
+        com.example.myfile.core.TrafficMonitor.debug("MyFile v1.1.5 (Build 105) 启动成功")
     }
 
     companion object {
