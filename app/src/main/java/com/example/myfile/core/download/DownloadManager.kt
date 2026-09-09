@@ -93,7 +93,8 @@ class DownloadManager(
         remotePath: String,
         fileName: String,
         localDir: File,
-        knownSize: Long = -1L
+        knownSize: Long = -1L,
+        forceRename: Boolean = false
     ): Long = withContext(Dispatchers.IO) {
         val client = clientProvider(account)
         // 优先用已知大小（列目录时 PROPFIND Depth:1 已拿到 getcontentlength），否则回退 HEAD/PROPFIND
@@ -108,9 +109,8 @@ class DownloadManager(
         // 改名下载（伪装视频）：把非 .avi 文件临时改成 .avi 后缀（服务器端 MOVE），
         // 绕过运营商按 Content-Type / 扩展名的限速，下载完成后改回原名。
         // 仅影响远程路径，本地文件名保持原名不变。
-        val settings = settingsProvider()
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        val shouldRename = settings.renameToVideoExt && ext != "avi"
+        val shouldRename = (forceRename || account.renameToVideoExt) && ext != "avi"
         // 实际下载用的远程路径（可能被改名为 .avi）
         val downloadPath: String
         if (shouldRename) {

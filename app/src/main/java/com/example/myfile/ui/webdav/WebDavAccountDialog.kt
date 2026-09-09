@@ -12,6 +12,11 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -28,6 +33,12 @@ fun WebDavAccountDialog(
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var user by remember { mutableStateOf(initial?.username ?: "") }
     var pass by remember { mutableStateOf(initial?.password ?: "") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var renameToVideoExt by remember { mutableStateOf(initial?.renameToVideoExt ?: true) }
+    var streamFakeAvi by remember { mutableStateOf(initial?.streamFakeAvi ?: false) }
+    var isEncrypted by remember { mutableStateOf(initial?.isEncrypted ?: false) }
+    var encryptPassword by remember { mutableStateOf(initial?.encryptPassword ?: "") }
+    var encryptPasswordVisible by remember { mutableStateOf(false) }
     var isDynamic by remember { mutableStateOf(initial?.isDynamic ?: false) }
     var resolvedUrl by remember { mutableStateOf(initial?.resolvedUrl ?: "") }
     var extraPorts by remember { mutableStateOf(initial?.extraUrls?.joinToString(",") { extractPort(it) } ?: "") }
@@ -127,7 +138,16 @@ fun WebDavAccountDialog(
                     onValueChange = { pass = it.replace("\r", "").replace("\n", "") },
                     label = { Text("密码") },
                     singleLine = true,
-                    maxLines = 1
+                    maxLines = 1,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
+                            )
+                        }
+                    }
                 )
                 OutlinedTextField(
                     value = extraPorts,
@@ -139,6 +159,88 @@ fun WebDavAccountDialog(
                         Text("多个打洞端口轮换下载，绕过运营商流量额度限速", style = MaterialTheme.typography.bodySmall)
                     }
                 )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                // 加速下载（改名下载）开关
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("改名下载（加速下载）", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "点击 APK 或大于 5M 文件时采用改名多线程加速下载，绕过运营商限速",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = renameToVideoExt,
+                        onCheckedChange = { renameToVideoExt = it }
+                    )
+                }
+
+                // 视频播放伪装 .avi 加速开关
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("视频播放伪装 .avi 加速", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "在线播放视频时临时改名为 .avi，加速流媒体加载与播放",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = streamFakeAvi,
+                        onCheckedChange = { streamFakeAvi = it }
+                    )
+                }
+
+                // 配置加密保护开关
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("配置加密保护", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "切换到该配置时需要输入密码或指纹解锁",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isEncrypted,
+                        onCheckedChange = { isEncrypted = it }
+                    )
+                }
+
+                if (isEncrypted) {
+                    OutlinedTextField(
+                        value = encryptPassword,
+                        onValueChange = { encryptPassword = it.replace("\r", "").replace("\n", "") },
+                        label = { Text("独立解锁密码") },
+                        placeholder = { Text("留空则默认使用上方 WebDAV 密码") },
+                        supportingText = { Text("切换到该配置时验证此密码或指纹（留空使用 WebDAV 密码）", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        maxLines = 1,
+                        visualTransformation = if (encryptPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { encryptPasswordVisible = !encryptPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (encryptPasswordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    contentDescription = if (encryptPasswordVisible) "隐藏密码" else "显示密码"
+                                )
+                            }
+                        }
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     OutlinedButton(
@@ -168,7 +270,11 @@ fun WebDavAccountDialog(
                                 username = user.trim(),
                                 password = pass,
                                 isDynamic = isDynamic,
-                                resolvedUrl = resolvedUrl
+                                resolvedUrl = resolvedUrl,
+                                renameToVideoExt = renameToVideoExt,
+                                streamFakeAvi = streamFakeAvi,
+                                isEncrypted = isEncrypted,
+                                encryptPassword = encryptPassword
                             )
                             kotlinx.coroutines.GlobalScope.launch {
                                 val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
@@ -222,7 +328,11 @@ fun WebDavAccountDialog(
                             password = pass,
                             extraUrls = extras,
                             isDynamic = isDynamic,
-                            resolvedUrl = resolvedUrl
+                            resolvedUrl = resolvedUrl,
+                            renameToVideoExt = renameToVideoExt,
+                            streamFakeAvi = streamFakeAvi,
+                            isEncrypted = isEncrypted,
+                            encryptPassword = encryptPassword
                         )
                     )
                 }

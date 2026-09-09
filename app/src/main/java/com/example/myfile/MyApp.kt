@@ -78,6 +78,9 @@ class MyApp : Application(), ImageLoaderFactory {
     lateinit var accountPathStore: com.example.myfile.data.prefs.AccountPathStore
         private set
 
+    lateinit var favoritePathStore: com.example.myfile.data.prefs.FavoritePathStore
+        private set
+
     lateinit var viewModeStore: com.example.myfile.data.prefs.ViewModeStore
         private set
 
@@ -132,6 +135,7 @@ class MyApp : Application(), ImageLoaderFactory {
         defaultAppStore = DefaultAppStore(this)
         folderSortStore = com.example.myfile.data.prefs.FolderSortStore(this)
         accountPathStore = com.example.myfile.data.prefs.AccountPathStore(this)
+        favoritePathStore = com.example.myfile.data.prefs.FavoritePathStore(this)
         viewModeStore = com.example.myfile.data.prefs.ViewModeStore(this)
 
         appScope.launch {

@@ -39,52 +39,6 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 改名下载（伪装视频）开关 —— 常驻最顶部
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("改名下载（伪装视频加速）", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "下载文件前临时在服务器端将后缀改成 .avi（支持视频与各类文件），绕过运营商限速，下载完成后自动改回原名",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = s.renameToVideoExt,
-                        onCheckedChange = { vm.updateRenameToVideoExt(it) }
-                    )
-                }
-            }
-
-            // 视频播放伪装 .avi 后缀开关
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("视频播放伪装 .avi 后缀加速", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "在线播放视频时临时将服务器端文件改名为 .avi，加速流媒体加载与播放，退出播放时自动恢复原名，格式交由播放器解析",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = s.streamFakeAvi,
-                        onCheckedChange = { vm.updateStreamFakeAvi(it) }
-                    )
-                }
-            }
-
 
             // 分片大小
             Section(title = stringResource(R.string.settings_chunk_size)) {

@@ -35,7 +35,11 @@ class AccountStore(private val context: Context) {
                             (0 until ea.length()).map { j -> ea.getString(j) }
                         } ?: emptyList(),
                         isDynamic = o.optBoolean("isDynamic", false),
-                        resolvedUrl = o.optString("resolvedUrl", "")
+                        resolvedUrl = o.optString("resolvedUrl", ""),
+                        renameToVideoExt = o.optBoolean("renameToVideoExt", true),
+                        streamFakeAvi = o.optBoolean("streamFakeAvi", false),
+                        isEncrypted = o.optBoolean("isEncrypted", false),
+                        encryptPassword = o.optString("encryptPassword", "")
                     )
                 }
             } catch (e: Exception) { emptyList() }
@@ -57,6 +61,10 @@ class AccountStore(private val context: Context) {
                     }
                     put("isDynamic", a.isDynamic)
                     put("resolvedUrl", a.resolvedUrl)
+                    put("renameToVideoExt", a.renameToVideoExt)
+                    put("streamFakeAvi", a.streamFakeAvi)
+                    put("isEncrypted", a.isEncrypted)
+                    put("encryptPassword", a.encryptPassword)
                 })
             }
             p[key] = arr.toString()

@@ -239,6 +239,135 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 6.dp)
                     )
+
+                    Spacer(Modifier.width(4.dp))
+
+                    // 常用路径按钮
+                    var showFavoritesMenu by remember { mutableStateOf(false) }
+                    val favoriteKey = com.example.myfile.data.prefs.FavoritePathStore.LOCAL_STORAGE_KEY
+                    var favoritesList by remember { mutableStateOf(emptyList<String>()) }
+                    LaunchedEffect(showFavoritesMenu) {
+                        favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                    }
+
+                    Box {
+                        Surface(
+                            onClick = { showFavoritesMenu = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.BookmarkBorder,
+                                    contentDescription = "常用路径",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(3.dp))
+                                Text(
+                                    text = "常用路径",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Filled.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showFavoritesMenu,
+                            onDismissRequest = { showFavoritesMenu = false }
+                        ) {
+                            // 列表最上方为保存当前路径到常用路径
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "★ 保存当前路径到常用路径",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                },
+                                onClick = {
+                                    showFavoritesMenu = false
+                                    MyApp.instance.favoritePathStore.addFavorite(favoriteKey, state.currentDir.absolutePath)
+                                    favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("已保存当前路径到常用路径")
+                                    }
+                                }
+                            )
+
+                            HorizontalDivider()
+
+                            if (favoritesList.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("暂无常用路径", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) },
+                                    onClick = { }
+                                )
+                            } else {
+                                favoritesList.forEach { favPath ->
+                                    val isCurrent = favPath == state.currentDir.absolutePath
+                                    val displayName = try {
+                                        val rel = java.io.File(favPath).relativeToOrNull(vm.rootDir)?.path
+                                        if (rel.isNullOrBlank()) "根目录" else rel
+                                    } catch (_: Exception) { favPath }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = displayName,
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Folder,
+                                                null,
+                                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            IconButton(
+                                                onClick = {
+                                                    MyApp.instance.favoritePathStore.removeFavorite(favoriteKey, favPath)
+                                                    favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Close,
+                                                    contentDescription = "删除",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            showFavoritesMenu = false
+                                            val target = java.io.File(favPath)
+                                            if (target.exists() && target.isDirectory) {
+                                                vm.navigateTo(target)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.weight(1f))
                     if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
                         Surface(

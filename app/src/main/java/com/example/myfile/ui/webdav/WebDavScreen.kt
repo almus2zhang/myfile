@@ -59,6 +59,7 @@ import com.example.myfile.ui.components.FileListItem
 import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
 import com.example.myfile.ui.components.ApkDownloadDialog
+import com.example.myfile.ui.components.AccountUnlockDialog
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -75,6 +76,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     var showSortMenu by remember { mutableStateOf(false) }
     var downloadingApkTaskId by remember { mutableStateOf<Long?>(null) }
     var downloadingApkFileName by remember { mutableStateOf("") }
+    var pendingUnlockAccount by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
+    var pendingUnlockForEdit by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -308,6 +311,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 )
                                                 Spacer(Modifier.width(4.dp))
                                             }
+                                            if (acc.isEncrypted) {
+                                                Icon(
+                                                    Icons.Filled.Lock,
+                                                    contentDescription = "已加密",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                            }
                                             Text(
                                                 text = acc.name,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -325,8 +337,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             IconButton(
                                                 onClick = {
                                                     showAccountMenu = false
-                                                    editingAccount = acc
-                                                    showAccountDialog = true
+                                                    if (acc.isEncrypted && acc.id != state.currentAccount?.id) {
+                                                        pendingUnlockForEdit = acc
+                                                    } else {
+                                                        editingAccount = acc
+                                                        showAccountDialog = true
+                                                    }
                                                 },
                                                 modifier = Modifier.size(28.dp)
                                             ) {
@@ -345,7 +361,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     },
                                     onClick = {
                                         showAccountMenu = false
-                                        vm.selectAccount(acc)
+                                        if (acc.isEncrypted && acc.id != state.currentAccount?.id) {
+                                            pendingUnlockAccount = acc
+                                        } else {
+                                            vm.selectAccount(acc)
+                                        }
                                     }
                                 )
                             }
@@ -362,6 +382,139 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     showAccountDialog = true
                                 }
                             )
+                        }
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    // 在配置列表右边是常用路径列表
+                    var showFavoritesMenu by remember { mutableStateOf(false) }
+                    val currentAcc = state.currentAccount
+                    val favoriteKey = remember(currentAcc?.id) {
+                        currentAcc?.let { com.example.myfile.data.prefs.FavoritePathStore.buildWebDavKey(it.id) }
+                    }
+                    var favoritesList by remember { mutableStateOf(emptyList<String>()) }
+                    LaunchedEffect(favoriteKey, showFavoritesMenu) {
+                        if (favoriteKey != null) {
+                            favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                        } else {
+                            favoritesList = emptyList()
+                        }
+                    }
+
+                    Box {
+                        Surface(
+                            onClick = { showFavoritesMenu = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.BookmarkBorder,
+                                    contentDescription = "常用路径",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(3.dp))
+                                Text(
+                                    text = "常用路径",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Filled.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showFavoritesMenu,
+                            onDismissRequest = { showFavoritesMenu = false }
+                        ) {
+                            // 列表最上方为保存当前路径到常用路径
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "★ 保存当前路径到常用路径",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                },
+                                onClick = {
+                                    showFavoritesMenu = false
+                                    if (favoriteKey != null) {
+                                        MyApp.instance.favoritePathStore.addFavorite(favoriteKey, state.currentPath)
+                                        favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("已保存当前路径到常用路径")
+                                        }
+                                    }
+                                }
+                            )
+
+                            HorizontalDivider()
+
+                            if (favoritesList.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("暂无常用路径", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) },
+                                    onClick = { }
+                                )
+                            } else {
+                                favoritesList.forEach { favPath ->
+                                    val isCurrent = favPath == state.currentPath
+                                    val displayName = if (favPath == "/") "根目录 (/)" else favPath
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = displayName,
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Folder,
+                                                null,
+                                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            IconButton(
+                                                onClick = {
+                                                    if (favoriteKey != null) {
+                                                        MyApp.instance.favoritePathStore.removeFavorite(favoriteKey, favPath)
+                                                        favoritesList = MyApp.instance.favoritePathStore.getFavorites(favoriteKey)
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Close,
+                                                    contentDescription = "删除",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            showFavoritesMenu = false
+                                            vm.navigateTo(favPath)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -898,7 +1051,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     scope.launch {
                                         val appCtx = context.applicationContext
                                         val isVid = FileOpener.isVideo(entry.name)
-                                        val fakeAvi = currentSettings.streamFakeAvi
+                                        val fakeAvi = acc.streamFakeAvi
                                         val ext = entry.name.substringAfterLast('.', "").lowercase()
 
                                         val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
@@ -1009,7 +1162,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     }
                                 }
 
-                                fun startAcceleratedDownload(entryToDownload: FileEntry) {
+                                fun startAcceleratedDownload(entryToDownload: FileEntry, forceRename: Boolean = false) {
                                     if (acc == null) return
                                     scope.launch {
                                         try {
@@ -1024,7 +1177,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 entryToDownload.path,
                                                 entryToDownload.name,
                                                 dir,
-                                                knownSize = entryToDownload.size
+                                                knownSize = entryToDownload.size,
+                                                forceRename = forceRename
                                             )
                                             downloadingApkFileName = entryToDownload.name
                                             downloadingApkTaskId = taskId
@@ -1049,8 +1203,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         editingTextEntry = entry
                                     } else if (category == "video") {
                                         openEntry(forceChooser = false)
-                                    } else if (currentSettings.renameToVideoExt && (category == "apk" || entry.size > 5 * 1024 * 1024L)) {
-                                        // 改名下载开启时：apk 或大于 5M 的其他文件采用加速下载方式
+                                    } else if ((acc?.renameToVideoExt == true) && (category == "apk" || entry.size > 5 * 1024 * 1024L)) {
+                                        // 配置开启改名加速下载时：apk 或大于 5M 的其他文件采用加速下载方式
                                         val localDownloaded = File(
                                             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "myfile"),
                                             entry.name
@@ -1062,7 +1216,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 openEntry(forceChooser = false)
                                             }
                                         } else {
-                                            startAcceleratedDownload(entry)
+                                            startAcceleratedDownload(entry, forceRename = false)
                                         }
                                     } else {
                                         openEntry(forceChooser = false)
@@ -1111,21 +1265,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                             openEntry(forceChooser = true)
                                                         }
                                                     )
+                                                    // 三个点点击后的加速下载永远生效
                                                     DropdownMenuItem(
-                                                        text = { Text(if (currentSettings.renameToVideoExt) "加速下载" else "下载") },
+                                                        text = { Text("加速下载") },
                                                         leadingIcon = { Icon(Icons.Filled.Download, null) },
                                                         onClick = {
                                                             showMenu = false
-                                                            if (currentSettings.renameToVideoExt) {
-                                                                startAcceleratedDownload(entry)
-                                                            } else {
-                                                                state.currentAccount?.let { a ->
-                                                                    vm.downloadFile(a, entry)
-                                                                    scope.launch {
-                                                                        snackbarHostState.showSnackbar("已加入下载队列")
-                                                                    }
-                                                                }
-                                                            }
+                                                            startAcceleratedDownload(entry, forceRename = true)
                                                         }
                                                     )
                                                 }
@@ -1263,6 +1409,29 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             initial = editingAccount,
             onDismiss = { showAccountDialog = false },
             onSave = { vm.saveAccount(it); showAccountDialog = false }
+        )
+    }
+
+    pendingUnlockAccount?.let { accToUnlock ->
+        AccountUnlockDialog(
+            account = accToUnlock,
+            onUnlockSuccess = {
+                pendingUnlockAccount = null
+                vm.selectAccount(accToUnlock)
+            },
+            onDismiss = { pendingUnlockAccount = null }
+        )
+    }
+
+    pendingUnlockForEdit?.let { accToUnlock ->
+        AccountUnlockDialog(
+            account = accToUnlock,
+            onUnlockSuccess = {
+                pendingUnlockForEdit = null
+                editingAccount = accToUnlock
+                showAccountDialog = true
+            },
+            onDismiss = { pendingUnlockForEdit = null }
         )
     }
 
