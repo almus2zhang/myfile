@@ -3,6 +3,7 @@ package com.example.myfile.ui.webdav
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -897,7 +898,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     scope.launch {
                                         val appCtx = context.applicationContext
                                         val isVid = FileOpener.isVideo(entry.name)
-                                        val fakeAvi = com.example.myfile.MyApp.instance.currentSettings.value.streamFakeAvi
+                                        val fakeAvi = currentSettings.streamFakeAvi
                                         val ext = entry.name.substringAfterLast('.', "").lowercase()
 
                                         val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
@@ -924,12 +925,22 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             val fileToOpen = if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
                                                 downloadedFile
                                             } else {
-                                                FileOpener.downloadToCache(
-                                                    client = com.example.myfile.MyApp.instance.okHttpClient,
-                                                    authHeader = auth ?: "",
-                                                    url = fullUrl,
-                                                    fileName = entry.name
-                                                ) ?: return@launch
+                                                Toast.makeText(context, "正在下载 ${entry.name}...", Toast.LENGTH_SHORT).show()
+                                                val downloaded = FileOpener.downloadToCache(
+                                                     client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                     authHeader = auth ?: "",
+                                                     url = fullUrl,
+                                                     fileName = entry.name
+                                                )
+                                                if (downloaded == null) {
+                                                    Toast.makeText(context, "下载失败，请检查网络", Toast.LENGTH_SHORT).show()
+                                                    return@launch
+                                                }
+                                                downloaded
+                                            }
+                                            if (category == "apk") {
+                                                ApkInstaller.install(context, fileToOpen)
+                                                return@launch
                                             }
                                             FileOpener.buildLocalViewIntent(appCtx, fileToOpen)
                                         }
@@ -1038,8 +1049,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         editingTextEntry = entry
                                     } else if (category == "video") {
                                         openEntry(forceChooser = false)
-                                    } else if (category == "apk" || entry.size > 5 * 1024 * 1024L) {
-                                        // apk 或大于 5M 的其他文件采用加速下载方式
+                                    } else if (currentSettings.renameToVideoExt && (category == "apk" || entry.size > 5 * 1024 * 1024L)) {
+                                        // 改名下载开启时：apk 或大于 5M 的其他文件采用加速下载方式
                                         val localDownloaded = File(
                                             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "myfile"),
                                             entry.name
@@ -1101,11 +1112,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                         }
                                                     )
                                                     DropdownMenuItem(
-                                                        text = { Text("加速下载") },
+                                                        text = { Text(if (currentSettings.renameToVideoExt) "加速下载" else "下载") },
                                                         leadingIcon = { Icon(Icons.Filled.Download, null) },
                                                         onClick = {
                                                             showMenu = false
-                                                            startAcceleratedDownload(entry)
+                                                            if (currentSettings.renameToVideoExt) {
+                                                                startAcceleratedDownload(entry)
+                                                            } else {
+                                                                state.currentAccount?.let { a ->
+                                                                    vm.downloadFile(a, entry)
+                                                                    scope.launch {
+                                                                        snackbarHostState.showSnackbar("已加入下载队列")
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     )
                                                 }
