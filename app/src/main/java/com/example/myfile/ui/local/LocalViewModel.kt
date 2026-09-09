@@ -43,6 +43,35 @@ class LocalViewModel : ViewModel() {
     private val _state = MutableStateFlow(LocalUiState(currentDir = rootDir))
     val state: StateFlow<LocalUiState> = _state.asStateFlow()
 
+    private val viewModeStore = MyApp.instance.viewModeStore
+
+    val viewMode: StateFlow<com.example.myfile.model.ViewMode> = viewModeStore.localViewMode
+
+    fun setViewMode(mode: com.example.myfile.model.ViewMode) {
+        viewModeStore.setLocalViewMode(mode)
+    }
+
+    val showThumbnailsAndDuration: StateFlow<Boolean> = viewModeStore.showThumbnailsAndDuration
+
+    fun setShowThumbnailsAndDuration(show: Boolean) {
+        viewModeStore.setShowThumbnailsAndDuration(show)
+    }
+
+    fun toggleShowThumbnailsAndDuration() {
+        val current = viewModeStore.showThumbnailsAndDuration.value
+        viewModeStore.setShowThumbnailsAndDuration(!current)
+    }
+
+    private val _durationRefreshTrigger = MutableStateFlow(0)
+    val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
+
+    fun forceRefreshDurations() {
+        if (!viewModeStore.showThumbnailsAndDuration.value) {
+            viewModeStore.setShowThumbnailsAndDuration(true)
+        }
+        _durationRefreshTrigger.value += 1
+    }
+
     private fun getFolderSort(path: String): Pair<com.example.myfile.ui.webdav.SortMode, Boolean> {
         val folderKey = com.example.myfile.data.prefs.FolderSortStore.buildLocalKey(path)
         return MyApp.instance.folderSortStore.getSort(folderKey) ?: (com.example.myfile.ui.webdav.SortMode.NAME to true)
@@ -161,7 +190,7 @@ class LocalViewModel : ViewModel() {
         _state.value = _state.value.copy(
             selected = emptySet(),
             multiSelectMode = false,
-            message = "已复制 ${items.size} 项，可在任意目录粘贴"
+            message = null
         )
     }
 
@@ -176,11 +205,11 @@ class LocalViewModel : ViewModel() {
         _state.value = _state.value.copy(
             selected = emptySet(),
             multiSelectMode = false,
-            message = "已剪切 ${items.size} 项，可在任意目录粘贴"
+            message = null
         )
     }
 
-    fun pasteHere(context: android.content.Context) {
+    fun pasteHere(context: android.content.Context, onDone: (() -> Unit)? = null) {
         val items = com.example.myfile.core.TransferClipboard.items.value
         if (items.isEmpty()) return
         val isCut = com.example.myfile.core.TransferClipboard.isCut
@@ -198,8 +227,9 @@ class LocalViewModel : ViewModel() {
                     selected = emptySet(),
                     multiSelectMode = false,
                     isRefreshing = false,
-                    message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项"
+                    message = if (count > 0) (if (isCut) "已移动 $count 项" else "已粘贴 $count 项") else "粘贴失败或未移动任何文件"
                 )
+                onDone?.invoke()
                 refresh()
             }
         }
@@ -209,13 +239,15 @@ class LocalViewModel : ViewModel() {
         _state.value = _state.value.copy(message = null)
     }
 
-    fun newFolder(name: String) {
+    fun mkdir(name: String) {
         viewModelScope.launch {
             val ok = repo.mkdir(_state.value.currentDir, name)
             _state.value = _state.value.copy(message = if (ok) "已创建" else "创建失败")
             refresh()
         }
     }
+
+    fun newFolder(name: String) = mkdir(name)
 
     fun deleteSelected() {
         viewModelScope.launch {

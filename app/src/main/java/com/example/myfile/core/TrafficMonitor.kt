@@ -12,10 +12,13 @@ import kotlinx.coroutines.launch
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okio.Buffer
+import okio.BufferedSink
 import okio.BufferedSource
+import okio.ForwardingSink
 import okio.ForwardingSource
 import okio.buffer
 import java.io.IOException
@@ -212,12 +215,42 @@ object TrafficMonitor {
         _activeTransfers.value = recordsMap.values.sortedByDescending { it.id }
         ensureTicker()
 
+        val reqBody = request.body
+        val finalRequest = if (reqBody != null) {
+            val reqLen = try { reqBody.contentLength() } catch (_: Exception) { -1L }
+            if (reqLen > 0L) {
+                record.totalBytesExpected = reqLen
+            }
+            val countingBody = object : RequestBody() {
+                override fun contentType(): MediaType? = reqBody.contentType()
+                override fun contentLength(): Long = reqLen
+                override fun writeTo(sink: BufferedSink) {
+                    val countingSink = object : ForwardingSink(sink) {
+                        override fun write(source: Buffer, byteCount: Long) {
+                            super.write(source, byteCount)
+                            record.totalBytesRead += byteCount
+                        }
+                    }
+                    val buffered = countingSink.buffer()
+                    reqBody.writeTo(buffered)
+                    buffered.flush()
+                }
+            }
+            request.newBuilder().method(request.method, countingBody).build()
+        } else {
+            request
+        }
+
         val response: Response
         try {
-            response = chain.proceed(request)
+            response = chain.proceed(finalRequest)
             record.responseCode = response.code
-            val cl = response.body?.contentLength() ?: -1L
-            record.totalBytesExpected = cl
+            if (reqBody == null) {
+                val cl = response.body?.contentLength() ?: -1L
+                if (cl > 0L) {
+                    record.totalBytesExpected = cl
+                }
+            }
         } catch (e: Exception) {
             val status = if (chain.call().isCanceled()) TransferState.CANCELED else TransferState.FAILED
             finishRecord(recordId, status, error = e.message)
@@ -239,9 +272,10 @@ object TrafficMonitor {
                     override fun read(sink: Buffer, byteCount: Long): Long {
                         try {
                             val bytesRead = super.read(sink, byteCount)
-                            if (bytesRead > 0) {
+                            if (reqBody == null && bytesRead > 0) {
                                 record.totalBytesRead += bytesRead
-                            } else if (bytesRead == -1L) {
+                            }
+                            if (bytesRead == -1L) {
                                 finishRecord(recordId, TransferState.COMPLETED, response.code)
                             }
                             return bytesRead
@@ -264,6 +298,16 @@ object TrafficMonitor {
                     }
                 }
                 return forwardingSource.buffer()
+            }
+
+            override fun close() {
+                try {
+                    originalBody.close()
+                } finally {
+                    if (record.status == TransferState.ACTIVE) {
+                        finishRecord(recordId, TransferState.COMPLETED, response.code)
+                    }
+                }
             }
         }
 

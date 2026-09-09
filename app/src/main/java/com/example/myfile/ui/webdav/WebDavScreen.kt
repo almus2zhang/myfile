@@ -160,7 +160,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     // 缩略图与时长是否启用：简洁视图不显示；其余视图受 showThumbnailsAndDuration 控制
     val shouldLoadMedia = showThumbnailsAndDuration && (viewMode != ViewMode.COMPACT)
 
-    // WebDAV 视频：后台异步探查视频时长（基于轻量 HTTP Range 读取文件头与 moov 索引，0 全量下载）
+    // WebDAV 视频：通过 StreamProxy 后台异步探查视频时长（走 OkHttp 并在传输监视器中实时显示，零全量下载）
     LaunchedEffect(state.files, shouldLoadMedia, durationRefreshTrigger) {
         if (!shouldLoadMedia) return@LaunchedEffect
         val acc = state.currentAccount ?: return@LaunchedEffect
@@ -169,36 +169,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             val isForce = (durationRefreshTrigger != lastProcessedTrigger)
             lastProcessedTrigger = durationRefreshTrigger
             withContext(Dispatchers.IO) {
-                val auth = "Basic " + java.util.Base64.getEncoder()
-                    .encodeToString("${acc.username}:${acc.password}".toByteArray())
                 for (v in videoEntries) {
-                    val p = if (v.path.startsWith("/")) v.path else "/${v.path}"
-                    val videoKey = "acc_${acc.id}$p"
-                    val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
-                    if (isForce || saved == null || saved.durationMs <= 0L) {
-                        val mmr = android.media.MediaMetadataRetriever()
-                        try {
-                            val fullUrl = acc.connectionUrl().trimEnd('/') + p
-                            val headers = HashMap<String, String>()
-                            headers["Authorization"] = auth
-                            headers["User-Agent"] = "myfile/1.0 (Android; WebDAV)"
-                            mmr.setDataSource(fullUrl, headers)
-                            val dur = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                            if (dur > 0L) {
-                                MyApp.instance.db.videoProgressDao().save(
-                                    com.example.myfile.data.db.entity.VideoProgressEntity(
-                                        uriKey = videoKey,
-                                        positionMs = saved?.positionMs ?: 0L,
-                                        durationMs = dur,
-                                        updatedAt = System.currentTimeMillis()
-                                    )
-                                )
-                            }
-                        } catch (_: Exception) {
-                        } finally {
-                            try { mmr.release() } catch (_: Exception) {}
-                        }
-                    }
+                    com.example.myfile.core.StreamProxy.probeDuration(
+                        client = MyApp.instance.okHttpClient,
+                        account = acc,
+                        remotePath = v.path,
+                        force = isForce
+                    )
                 }
             }
         }

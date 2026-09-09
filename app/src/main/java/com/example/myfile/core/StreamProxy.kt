@@ -307,4 +307,65 @@ object StreamProxy {
     fun unregister(token: String) {
         entries.remove(token)
     }
+
+    /**
+     * 通过 StreamProxy 探查远程视频时长：
+     * 1. 走 OkHttp 并经过 TrafficMonitor，能够在网络传输监视器中实时显示
+     * 2. MediaMetadataRetriever 访问 127.0.0.1，彻底避免原生 Basic Auth 鉴权失败与兼容性问题
+     */
+    suspend fun probeDuration(
+        client: OkHttpClient,
+        account: WebDavAccount,
+        remotePath: String,
+        force: Boolean = false
+    ): Long {
+        val p = ensureStarted()
+        val path = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
+        val rawKey = "acc_${account.id}$path"
+
+        val existing = MyApp.instance.db.videoProgressDao().get(rawKey)
+        if (!force && existing != null && existing.durationMs > 0L) {
+            return existing.durationMs
+        }
+
+        val md5 = MessageDigest.getInstance("MD5")
+            .digest(rawKey.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+        entries[md5] = Entry(
+            client = client,
+            account = account,
+            remotePath = path,
+            rawKey = rawKey,
+            originalPath = path,
+            fakeAvi = false
+        )
+
+        val baseName = path.substringAfterLast('/').ifBlank { "video.mp4" }
+        val encodedName = java.net.URLEncoder.encode(baseName, "UTF-8").replace("+", "%20")
+        val streamUrl = "http://127.0.0.1:$p/$md5/$encodedName"
+
+        val mmr = MediaMetadataRetriever()
+        var dur = 0L
+        try {
+            mmr.setDataSource(streamUrl, emptyMap())
+            dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (dur > 0L) {
+                MyApp.instance.db.videoProgressDao().save(
+                    VideoProgressEntity(
+                        uriKey = rawKey,
+                        positionMs = existing?.positionMs ?: 0L,
+                        durationMs = dur,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("StreamProxy", "probeDuration failed: ${e.message}")
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
+            entries.remove(md5)
+        }
+        return dur
+    }
 }

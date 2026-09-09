@@ -13,6 +13,9 @@ class ViewModeStore(context: Context) {
     private val _webDavViewMode = MutableStateFlow(loadWebDavMode())
     val webDavViewMode: StateFlow<ViewMode> = _webDavViewMode.asStateFlow()
 
+    private val _localViewMode = MutableStateFlow(loadLocalMode())
+    val localViewMode: StateFlow<ViewMode> = _localViewMode.asStateFlow()
+
     private val _showThumbnailsAndDuration = MutableStateFlow(loadShowThumbnailsAndDuration())
     val showThumbnailsAndDuration: StateFlow<Boolean> = _showThumbnailsAndDuration.asStateFlow()
 
@@ -28,6 +31,20 @@ class ViewModeStore(context: Context) {
     fun setWebDavViewMode(mode: ViewMode) {
         prefs.edit().putString("webdav_view_mode", mode.name).apply()
         _webDavViewMode.value = mode
+    }
+
+    private fun loadLocalMode(): ViewMode {
+        val name = prefs.getString("local_view_mode", ViewMode.DETAILS.name)
+        return try {
+            ViewMode.valueOf(name ?: ViewMode.DETAILS.name)
+        } catch (_: Exception) {
+            ViewMode.DETAILS
+        }
+    }
+
+    fun setLocalViewMode(mode: ViewMode) {
+        prefs.edit().putString("local_view_mode", mode.name).apply()
+        _localViewMode.value = mode
     }
 
     private fun loadShowThumbnailsAndDuration(): Boolean {

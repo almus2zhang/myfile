@@ -306,20 +306,83 @@ class WebDavClient(
 
     fun uploadFile(path: String, file: java.io.File): Boolean {
         val body = okhttp3.RequestBody.create("application/octet-stream".toMediaType(), file)
-        val req = requestBuilder("PUT", path, body).build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+        var currentUrl = fullUrl(path)
+        repeat(4) {
+            val req = requestBuilder("PUT", path, body).url(currentUrl).build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
+                    val loc = resp.header("Location")
+                    if (loc != null) {
+                        currentUrl = if (loc.startsWith("http")) loc else {
+                            val base = currentUrl.toHttpUrlOrNull() ?: return false
+                            base.newBuilder().encodedPath(loc).build().toString()
+                        }
+                        return@repeat
+                    }
+                }
+                val ok = resp.isSuccessful || resp.code == 201 || resp.code == 204
+                if (!ok) {
+                    val err = resp.body?.string()?.take(200) ?: ""
+                    Log.e("WebDavClient", "PUT failed code=${resp.code} msg=${resp.message} body=$err on $currentUrl")
+                }
+                return ok
+            }
+        }
+        return false
     }
 
     fun upload(path: String, bytes: ByteArray): Boolean {
         val body = bytes.toRequestBody("application/octet-stream".toMediaType())
-        val req = requestBuilder("PUT", path, body).build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+        var currentUrl = fullUrl(path)
+        repeat(4) {
+            val req = requestBuilder("PUT", path, body).url(currentUrl).build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
+                    val loc = resp.header("Location")
+                    if (loc != null) {
+                        currentUrl = if (loc.startsWith("http")) loc else {
+                            val base = currentUrl.toHttpUrlOrNull() ?: return false
+                            base.newBuilder().encodedPath(loc).build().toString()
+                        }
+                        return@repeat
+                    }
+                }
+                val ok = resp.isSuccessful || resp.code == 201 || resp.code == 204
+                if (!ok) {
+                    val err = resp.body?.string()?.take(200) ?: ""
+                    Log.e("WebDavClient", "PUT failed code=${resp.code} msg=${resp.message} body=$err on $currentUrl")
+                }
+                return ok
+            }
+        }
+        return false
     }
 
     /** 上传大文件用 RequestBody 流式 */
     fun uploadStream(path: String, body: RequestBody): Boolean {
-        val req = requestBuilder("PUT", path, body).build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+        var currentUrl = fullUrl(path)
+        repeat(4) {
+            val req = requestBuilder("PUT", path, body).url(currentUrl).build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
+                    val loc = resp.header("Location")
+                    if (loc != null) {
+                        currentUrl = if (loc.startsWith("http")) loc else {
+                            val base = currentUrl.toHttpUrlOrNull() ?: return false
+                            base.newBuilder().encodedPath(loc).build().toString()
+                        }
+                        return@repeat
+                    }
+                }
+                val ok = resp.isSuccessful || resp.code == 201 || resp.code == 204
+                if (!ok) {
+                    val err = resp.body?.string()?.take(200) ?: ""
+                    Log.e("WebDavClient", "PUT failed code=${resp.code} msg=${resp.message} body=$err on $currentUrl")
+                }
+                return ok
+            }
+        }
+        return false
     }
 
     /** 下载完整文件（单连接，仅小文件用） */
