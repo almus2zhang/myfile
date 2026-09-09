@@ -127,6 +127,20 @@ object TrafficMonitor {
         _recentTransfers.value = emptyList()
     }
 
+    fun debug(msg: String) {
+        val record = TrafficRecord(
+            id = idCounter.getAndIncrement(),
+            method = "DBG",
+            url = msg,
+            displayUrl = msg,
+            category = "[调试]",
+            status = TransferState.COMPLETED
+        ).also { it.endTime = System.currentTimeMillis() }
+        val cur = _recentTransfers.value.toMutableList()
+        cur.add(0, record)
+        _recentTransfers.value = if (cur.size > 50) cur.take(50) else cur
+    }
+
     fun cancelTransfer(id: Long) {
         val record = recordsMap[id] ?: return
         record.cancelAction?.invoke()

@@ -1051,6 +1051,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     scope.launch {
                                         val appCtx = context.applicationContext
                                         val isVid = FileOpener.isVideo(entry.name)
+                                        com.example.myfile.core.TrafficMonitor.debug("openEntry: ${entry.name}, isVid=$isVid, cat=$category, force=$forceChooser")
                                         val fakeAvi = acc.streamFakeAvi
                                         val ext = entry.name.substringAfterLast('.', "").lowercase()
 
@@ -1139,6 +1140,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         }
 
                                         val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                        com.example.myfile.core.TrafficMonitor.debug("默认应用检查: cat=$category, app=$defaultApp")
                                         if (!forceChooser && defaultApp != null) {
                                             val parts = defaultApp.split('/')
                                             if (parts.size == 2) {
@@ -1149,9 +1151,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 }
                                                 currentWatchingVideoKey = if (category == "video") videoKey else null
                                                 try {
+                                                    com.example.myfile.core.TrafficMonitor.debug("启动默认应用: ${parts[0]}/${parts[1]}")
                                                     externalLauncher.launch(explicit)
                                                     return@launch
-                                                } catch (_: Exception) {
+                                                } catch (e: Exception) {
+                                                    com.example.myfile.core.TrafficMonitor.debug("启动默认异常: ${e.message}")
                                                     currentWatchingVideoKey = null
                                                 }
                                             }
@@ -1171,6 +1175,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             }
                                         }
 
+                                        com.example.myfile.core.TrafficMonitor.debug("弹出选择器: cat=$category, 候选=${finalCandidates.size}")
                                         openWithRequest = OpenWithRequest(
                                             entry = entry,
                                             category = category,
@@ -1221,6 +1226,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         // 内置文本浏览和编辑器
                                         editingTextEntry = entry
                                     } else if (category == "video") {
+                                        com.example.myfile.core.TrafficMonitor.debug("点击视频: ${entry.name}")
                                         openEntry(forceChooser = false)
                                     } else if ((acc?.renameToVideoExt == true) && (category == "apk" || entry.size > 5 * 1024 * 1024L)) {
                                         // 配置开启改名加速下载时：apk 或大于 5M 的其他文件采用加速下载方式
@@ -1479,8 +1485,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 openWithRequest = null
             },
             onSelect = { candidate, always ->
+                com.example.myfile.core.TrafficMonitor.debug("选择应用: ${candidate.packageName}/${candidate.activityName}, always=$always")
                 if (always) {
-                    MyApp.instance.appScope.launch { FileOpener.setDefault(req.category, candidate) }
+                    MyApp.instance.appScope.launch {
+                        com.example.myfile.core.TrafficMonitor.debug("写入默认开始: ${req.category}")
+                        FileOpener.setDefault(req.category, candidate)
+                        com.example.myfile.core.TrafficMonitor.debug("写入默认完成: ${req.category}")
+                    }
                 }
                 scope.launch {
                     val explicit = Intent(req.intent).apply {

@@ -29,15 +29,21 @@ class DefaultAppStore(private val context: Context) {
     }
 
     /** 读取某个类别的默认程序（"packageName/activityName" 或 null） */
-    suspend fun get(category: String): String? = map.first()[category]
+    suspend fun get(category: String): String? {
+        val res = map.first()[category]
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.get: $category -> $res")
+        return res
+    }
 
     /** 设置某个类别的默认程序 */
     suspend fun set(category: String, packageName: String, activityName: String) {
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set开始: $category -> $packageName/$activityName")
         context.defaultAppStore.edit { p ->
             val current = p[key]?.let { decode(it) } ?: emptyMap()
             val updated = current + (category to "$packageName/$activityName")
             p[key] = encode(updated)
         }
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set完成: $category")
     }
 
     /** 清除某个类别的默认程序 */
