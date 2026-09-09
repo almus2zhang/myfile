@@ -60,6 +60,7 @@ import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
 import com.example.myfile.ui.components.ApkDownloadDialog
 import com.example.myfile.ui.components.AccountUnlockDialog
+import com.example.myfile.ui.components.formatSize
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -149,6 +150,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
 
     // 「打开方式」选择对话框状态
     var openWithRequest by remember { mutableStateOf<OpenWithRequest?>(null) }
+    var existingFileRequest by remember { mutableStateOf<ExistingFileRequest?>(null) }
     var renamingEntry by remember { mutableStateOf<FileEntry?>(null) }
     var propertiesEntry by remember { mutableStateOf<FileEntry?>(null) }
     var deletingEntry by remember { mutableStateOf<FileEntry?>(null) }
@@ -1046,7 +1048,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 val posMs = if (shouldLoadMedia) vProg?.positionMs else null
 
                                 // 打开文件逻辑
-                                fun openEntry(forceChooser: Boolean) {
+                                fun openEntry(forceChooser: Boolean, bypassExistingCheck: Boolean = false) {
                                     if (acc == null) return
                                     scope.launch {
                                         val appCtx = context.applicationContext
@@ -1076,6 +1078,28 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 "myfile"
                                             )
                                             val downloadedFile = File(dir, entry.name)
+                                            if (!bypassExistingCheck && downloadedFile.exists()) {
+                                                existingFileRequest = ExistingFileRequest(
+                                                    entry = entry,
+                                                    localFile = downloadedFile,
+                                                    isApk = category == "apk",
+                                                    onReDownload = {
+                                                        scope.launch {
+                                                            try { downloadedFile.delete() } catch (_: Exception) {}
+                                                            openEntry(forceChooser = forceChooser, bypassExistingCheck = true)
+                                                        }
+                                                    },
+                                                    onUseLocal = {
+                                                        if (category == "apk") {
+                                                            ApkInstaller.install(context, downloadedFile)
+                                                        } else {
+                                                            openEntry(forceChooser = forceChooser, bypassExistingCheck = true)
+                                                        }
+                                                    }
+                                                )
+                                                return@launch
+                                            }
+
                                             val fileToOpen = if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
                                                 downloadedFile
                                             } else {
@@ -1234,12 +1258,23 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "myfile"),
                                             entry.name
                                         )
-                                        if (localDownloaded.exists() && (entry.size <= 0 || localDownloaded.length() == entry.size)) {
-                                            if (category == "apk") {
-                                                ApkInstaller.install(context, localDownloaded)
-                                            } else {
-                                                openEntry(forceChooser = false)
-                                            }
+                                        if (localDownloaded.exists()) {
+                                            existingFileRequest = ExistingFileRequest(
+                                                entry = entry,
+                                                localFile = localDownloaded,
+                                                isApk = category == "apk",
+                                                onReDownload = {
+                                                    try { localDownloaded.delete() } catch (_: Exception) {}
+                                                    startAcceleratedDownload(entry, forceRename = false)
+                                                },
+                                                onUseLocal = {
+                                                    if (category == "apk") {
+                                                        ApkInstaller.install(context, localDownloaded)
+                                                    } else {
+                                                        openEntry(forceChooser = false, bypassExistingCheck = true)
+                                                    }
+                                                }
+                                            )
                                         } else {
                                             startAcceleratedDownload(entry, forceRename = false)
                                         }
@@ -1561,6 +1596,72 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
         )
     }
 
+    // 本地同名文件冲突提示对话框
+    existingFileRequest?.let { req ->
+        AlertDialog(
+            onDismissRequest = { existingFileRequest = null },
+            icon = {
+                Icon(
+                    imageVector = if (req.isApk) Icons.Filled.Android else Icons.Filled.Download,
+                    contentDescription = null,
+                    tint = if (req.isApk) Color(0xFF43A047) else MaterialTheme.colorScheme.primary
+                )
+            },
+            title = { Text("本地已存在同名文件") },
+            text = {
+                Column {
+                    Text(
+                        text = req.entry.name,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "本地文件大小: ${formatSize(req.localFile.length())}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (req.entry.size > 0) {
+                        Text(
+                            text = "远程文件大小: ${formatSize(req.entry.size)}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (req.isApk) "检测到本地 Downloads/myfile/ 中已存在同名安装包。要直接安装本地文件，还是从 WebDAV 重新下载最新文件？"
+                        else "检测到本地 Downloads/myfile/ 中已存在同名文件。要直接打开本地文件，还是从 WebDAV 重新下载最新文件？",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val action = req.onReDownload
+                    existingFileRequest = null
+                    action()
+                }) {
+                    Text("重新下载")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { existingFileRequest = null }) {
+                        Text("取消")
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedButton(onClick = {
+                        val action = req.onUseLocal
+                        existingFileRequest = null
+                        action()
+                    }) {
+                        Text(if (req.isApk) "安装本地" else "打开本地")
+                    }
+                }
+            }
+        )
+    }
+
     if (showTrafficDebug) {
         com.example.myfile.ui.components.DebugTrafficDialog(
             onDismiss = { showTrafficDebug = false }
@@ -1639,6 +1740,15 @@ private data class OpenWithRequest(
     val videoKey: String?,
     val intent: android.content.Intent,
     val candidates: List<AppCandidate>
+)
+
+/** 本地同名文件冲突提示请求数据 */
+private data class ExistingFileRequest(
+    val entry: FileEntry,
+    val localFile: File,
+    val isApk: Boolean,
+    val onReDownload: () -> Unit,
+    val onUseLocal: () -> Unit
 )
 
 /** 面包屑项 */

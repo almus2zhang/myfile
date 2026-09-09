@@ -78,7 +78,7 @@ fun DebugTrafficDialog(
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                "实时网络传输监视器 v1.1.5",
+                                "实时网络传输监视器 v1.1.6",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
