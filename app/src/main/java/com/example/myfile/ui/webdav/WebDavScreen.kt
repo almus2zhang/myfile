@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfile.MyApp
 import com.example.myfile.core.AppCandidate
@@ -274,32 +275,32 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 左侧：当前配置名胶囊按钮（限制宽度约两个半按钮 ~110dp，点击弹出配置下拉菜单）
+                    // 左侧：当前配置名按钮（无默认底色，点击时带淡淡波纹底色提示）
                     Box {
                         Surface(
                             onClick = { showAccountMenu = true },
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                            modifier = Modifier.height(34.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.height(36.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 10.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                             ) {
                                 Text(
                                     text = state.currentAccount?.name ?: "选择配置",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 110.dp)
+                                    modifier = Modifier.widthIn(max = 120.dp)
                                 )
                                 Spacer(Modifier.width(2.dp))
                                 Icon(
                                     Icons.Filled.ArrowDropDown,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(18.dp)
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -379,27 +380,38 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         }
                     }
 
-                    // 中间：若非根目录，紧凑展示当前子路径（点击可直接回退上级）
-                    if (state.currentPath != "/") {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = state.currentPath,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .clickable {
-                                    vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
-                                    vm.goUp()
-                                }
-                        )
-                    }
-
                     Spacer(Modifier.weight(1f))
 
-                    // 右侧紧凑操作按钮（高度统一 36dp 紧凑排列）
+                    // 速度显示在四个图标前面
+                    if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
+                        Surface(
+                            onClick = { showTrafficDebug = true },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 7.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Speed,
+                                    contentDescription = "网速",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(3.dp))
+                                Text(
+                                    text = com.example.myfile.ui.components.formatSpeed(totalSpeed),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(2.dp))
+                    }
+
+                    // 右侧四个操作按钮（稍微放大至 40dp，图标 24dp）
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -408,12 +420,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         Box {
                             IconButton(
                                 onClick = { showViewModeMenu = true },
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
                                     imageVector = viewMode.icon,
                                     contentDescription = "切换视图",
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             DropdownMenu(
@@ -435,7 +447,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 imageVector = mode.icon,
                                                 contentDescription = null,
                                                 tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier.size(22.dp)
                                             )
                                         },
                                         trailingIcon = if (isSelected) {
@@ -454,9 +466,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         Box {
                             IconButton(
                                 onClick = { showSortMenu = true },
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(40.dp)
                             ) {
-                                Icon(Icons.Filled.Sort, "排序", modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Sort, "排序", modifier = Modifier.size(24.dp))
                             }
                             DropdownMenu(
                                 expanded = showSortMenu,
@@ -500,7 +512,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                         // 3. 网络传输监控
                         IconButton(
                             onClick = { showTrafficDebug = true },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             BadgedBox(
                                 badge = {
@@ -509,16 +521,16 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     }
                                 }
                             ) {
-                                Icon(Icons.Filled.Speed, "网络传输监控", modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Speed, "网络传输监控", modifier = Modifier.size(24.dp))
                             }
                         }
 
                         // 4. 刷新按钮
                         IconButton(
                             onClick = { vm.refresh() },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(Icons.Filled.Refresh, "刷新", modifier = Modifier.size(20.dp))
+                            Icon(Icons.Filled.Refresh, "刷新", modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -533,46 +545,203 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             }
         },
         bottomBar = {
-            if (state.multiSelectMode) {
-                BottomAppBar {
-                    TextButton(onClick = { vm.selectAll() }) {
-                        Text("全选")
-                    }
-                    Button(onClick = { vm.copySelected() }) {
-                        Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("复制 (${state.selected.size})")
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { showBatchDeleteConfirm = true }) {
-                        Icon(Icons.Filled.Delete, "删除")
-                    }
-                    TextButton(onClick = { vm.clearSelection() }) {
-                        Text("取消")
-                    }
-                }
-            } else if (clipboardItems.isNotEmpty()) {
-                BottomAppBar {
-                    Text(
-                        "剪贴板: ${clipboardItems.size} 项",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(start = 12.dp)
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Button(onClick = { vm.pasteHere(context) }) {
-                        Icon(Icons.Filled.ContentPaste, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("粘贴到此处")
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { com.example.myfile.core.TransferClipboard.clear() }) {
-                        Text("清空")
+            // 文件选择后底部菜单：按钮下加文字，不要高亮。全选，复制，粘贴，删除，取消
+            if (state.multiSelectMode || clipboardItems.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .height(56.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 1. 全选
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = state.sortedFiles.isNotEmpty()) { vm.selectAll() }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.SelectAll,
+                                contentDescription = "全选",
+                                tint = if (state.sortedFiles.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "全选",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (state.sortedFiles.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        // 2. 复制
+                        val canCopy = state.selected.isNotEmpty()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = canCopy) { vm.copySelected() }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentCopy,
+                                contentDescription = "复制",
+                                tint = if (canCopy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (canCopy) "复制(${state.selected.size})" else "复制",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (canCopy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        // 3. 粘贴
+                        val canPaste = clipboardItems.isNotEmpty()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = canPaste) {
+                                    vm.pasteHere(context) {
+                                        com.example.myfile.core.TransferClipboard.clear()
+                                        vm.clearSelection()
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentPaste,
+                                contentDescription = "粘贴",
+                                tint = if (canPaste) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (canPaste) "粘贴(${clipboardItems.size})" else "粘贴",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (canPaste) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        // 4. 删除
+                        val canDelete = state.selected.isNotEmpty()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = canDelete) { showBatchDeleteConfirm = true }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = "删除",
+                                tint = if (canDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "删除",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (canDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        // 5. 取消
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    vm.clearSelection()
+                                    com.example.myfile.core.TransferClipboard.clear()
+                                }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "取消",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "取消",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // 第二行：路径面包屑栏，采用微胶囊风格与平滑横向滚动，方便逐级点击跳转
+            val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
+            if (state.currentAccount != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        crumbs.forEachIndexed { index, crumb ->
+                            if (index > 0) {
+                                Text(
+                                    text = "›",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                            val isCurrent = index == crumbs.lastIndex
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        if (!isCurrent) {
+                                            vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                            vm.navigateTo(crumb.path)
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = crumb.name,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             if (state.currentAccount == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

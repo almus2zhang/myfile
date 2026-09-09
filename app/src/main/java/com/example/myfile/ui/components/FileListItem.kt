@@ -184,8 +184,14 @@ fun FileListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-            val dateStr = fmt.format(Date(entry.lastModified))
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = entry.lastModified }
+            val curYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+            val dateFmt = if (cal.get(java.util.Calendar.YEAR) == curYear) {
+                SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+            } else {
+                SimpleDateFormat("yy-MM-dd HH:mm", Locale.getDefault())
+            }
+            val dateStr = dateFmt.format(Date(entry.lastModified))
 
             val timeInfo = if (visualType == VisualType.VIDEO) {
                 if (videoDurationMs != null && videoDurationMs > 0L) {
@@ -201,19 +207,19 @@ fun FileListItem(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 val metaText = if (entry.isDirectory) {
-                    "文件夹  ·  $dateStr"
+                    "文件夹 · $dateStr"
                 } else if (timeInfo != null) {
-                    "${formatSize(entry.size)}  ·  $dateStr  ·  $timeInfo"
+                    "${formatSize(entry.size)} · $dateStr · $timeInfo"
                 } else {
-                    "${formatSize(entry.size)}  ·  $dateStr"
+                    "${formatSize(entry.size)} · $dateStr"
                 }
                 Text(
                     text = metaText,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

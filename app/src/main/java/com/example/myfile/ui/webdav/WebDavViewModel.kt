@@ -254,7 +254,7 @@ class WebDavViewModel : ViewModel() {
         _state.value = _state.value.copy(
             selected = emptySet(),
             multiSelectMode = false,
-            message = "已复制 ${items.size} 项，可在任意目录粘贴"
+            message = null
         )
     }
 
@@ -270,7 +270,7 @@ class WebDavViewModel : ViewModel() {
         }
     }
 
-    fun pasteHere(context: android.content.Context) {
+    fun pasteHere(context: android.content.Context, onDone: (() -> Unit)? = null) {
         val acc = _state.value.currentAccount ?: return
         val items = com.example.myfile.core.TransferClipboard.items.value
         if (items.isEmpty()) return
@@ -278,7 +278,14 @@ class WebDavViewModel : ViewModel() {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true)
             val count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items)
-            _state.value = _state.value.copy(loading = false, message = "已粘贴 $count 项")
+            com.example.myfile.core.TransferClipboard.clear()
+            _state.value = _state.value.copy(
+                loading = false,
+                selected = emptySet(),
+                multiSelectMode = false,
+                message = "已粘贴 $count 项"
+            )
+            onDone?.invoke()
             refresh()
         }
     }
