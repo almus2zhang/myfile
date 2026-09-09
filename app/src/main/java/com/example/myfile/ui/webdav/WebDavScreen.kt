@@ -1478,24 +1478,22 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                 openWithRequest = null
             },
             onSelect = { candidate, always ->
-                scope.launch {
-                    if (always) {
-                        FileOpener.setDefault(req.category, candidate)
-                    }
-                    val explicit = Intent(req.intent).apply {
-                        component = candidate.component
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
-                    }
-                    currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
-                    try {
-                        externalLauncher.launch(explicit)
-                    } catch (e: Exception) {
-                        MyApp.instance.downloadManager.finishStreamingRename(req.entry.path)
-                        FileOpener.openWith(context, req.intent, candidate)
-                    }
+                if (always) {
+                    MyApp.instance.appScope.launch { FileOpener.setDefault(req.category, candidate) }
                 }
+                val explicit = Intent(req.intent).apply {
+                    component = candidate.component
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                }
+                currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
                 openWithRequest = null
+                try {
+                    externalLauncher.launch(explicit)
+                } catch (e: Exception) {
+                    scope.launch { MyApp.instance.downloadManager.finishStreamingRename(req.entry.path) }
+                    FileOpener.openWith(context, req.intent, candidate)
+                }
             },
             onSystemChooser = {
                 val clean = Intent(req.intent).apply {
