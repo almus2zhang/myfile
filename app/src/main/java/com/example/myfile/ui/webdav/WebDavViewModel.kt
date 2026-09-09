@@ -279,6 +279,22 @@ class WebDavViewModel : ViewModel() {
         )
     }
 
+    fun cutSelected() {
+        val acc = _state.value.currentAccount ?: return
+        val curFiles = _state.value.files.associateBy { it.path }
+        val items = _state.value.selected.mapNotNull { p ->
+            curFiles[p]?.let { entry ->
+                com.example.myfile.core.ClipboardEntry(entry = entry, account = acc)
+            }
+        }
+        com.example.myfile.core.TransferClipboard.cut(items)
+        _state.value = _state.value.copy(
+            selected = emptySet(),
+            multiSelectMode = false,
+            message = null
+        )
+    }
+
     fun deleteSelected() {
         val acc = _state.value.currentAccount ?: return
         val paths = _state.value.selected.toList()
@@ -295,16 +311,17 @@ class WebDavViewModel : ViewModel() {
         val acc = _state.value.currentAccount ?: return
         val items = com.example.myfile.core.TransferClipboard.items.value
         if (items.isEmpty()) return
+        val isCut = com.example.myfile.core.TransferClipboard.isCut
         val targetPath = _state.value.currentPath
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true)
-            val count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items)
+            val count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items, isCut = isCut)
             com.example.myfile.core.TransferClipboard.clear()
             _state.value = _state.value.copy(
                 loading = false,
                 selected = emptySet(),
                 multiSelectMode = false,
-                message = "已粘贴 $count 项"
+                message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项"
             )
             onDone?.invoke()
             refresh()

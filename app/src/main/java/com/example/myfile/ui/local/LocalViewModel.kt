@@ -165,13 +165,32 @@ class LocalViewModel : ViewModel() {
         )
     }
 
+    fun cutSelected() {
+        val curFiles = _state.value.files.associateBy { it.path }
+        val items = _state.value.selected.mapNotNull { p ->
+            curFiles[p]?.let { entry ->
+                com.example.myfile.core.ClipboardEntry(entry = entry, account = null)
+            }
+        }
+        com.example.myfile.core.TransferClipboard.cut(items)
+        _state.value = _state.value.copy(
+            selected = emptySet(),
+            multiSelectMode = false,
+            message = "已剪切 ${items.size} 项，可在任意目录粘贴"
+        )
+    }
+
     fun pasteHere(context: android.content.Context) {
         val items = com.example.myfile.core.TransferClipboard.items.value
         if (items.isEmpty()) return
+        val isCut = com.example.myfile.core.TransferClipboard.isCut
         val targetDir = _state.value.currentDir
         viewModelScope.launch {
-            val count = com.example.myfile.core.TransferOps.pasteToLocal(context, targetDir, items)
-            _state.value = _state.value.copy(message = "已粘贴 $count 项")
+            val count = com.example.myfile.core.TransferOps.pasteToLocal(context, targetDir, items, isCut = isCut)
+            if (isCut) {
+                com.example.myfile.core.TransferClipboard.clear()
+            }
+            _state.value = _state.value.copy(message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项")
             refresh()
         }
     }

@@ -336,6 +336,12 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                         Spacer(Modifier.width(4.dp))
                         Text("复制 (${state.selected.size})")
                     }
+                    Spacer(Modifier.width(4.dp))
+                    Button(onClick = { vm.cutSelected() }) {
+                        Icon(Icons.Filled.ContentCut, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("剪切 (${state.selected.size})")
+                    }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { showBatchDeleteConfirm = true }) {
                         Icon(Icons.Filled.Delete, "删除")

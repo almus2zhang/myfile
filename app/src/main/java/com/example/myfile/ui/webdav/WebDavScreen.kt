@@ -666,6 +666,30 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             )
                         }
 
+                        // 3. 剪切
+                        val canCut = state.selected.isNotEmpty()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = canCut) { vm.cutSelected() }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentCut,
+                                contentDescription = "剪切",
+                                tint = if (canCut) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (canCut) "剪切(${state.selected.size})" else "剪切",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (canCut) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
                         // 3. 粘贴
                         val canPaste = clipboardItems.isNotEmpty()
                         Column(

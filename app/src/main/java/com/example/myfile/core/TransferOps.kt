@@ -20,7 +20,8 @@ object TransferOps {
     suspend fun pasteToLocal(
         context: Context,
         targetDir: File,
-        items: List<ClipboardEntry>
+        items: List<ClipboardEntry>,
+        isCut: Boolean = false
     ): Int = withContext(Dispatchers.IO) {
         var successCount = 0
         if (!targetDir.exists()) targetDir.mkdirs()
@@ -32,12 +33,23 @@ object TransferOps {
                     val src = File(item.entry.path)
                     if (src.exists()) {
                         val dst = File(targetDir, item.entry.name)
-                        if (src.isDirectory) {
-                            src.copyRecursively(dst, overwrite = true)
-                        } else {
-                            src.copyTo(dst, overwrite = true)
+                        if (src.canonicalPath != dst.canonicalPath) {
+                            if (isCut) {
+                                val moved = src.renameTo(dst)
+                                if (!moved) {
+                                    if (src.isDirectory) src.copyRecursively(dst, overwrite = true)
+                                    else src.copyTo(dst, overwrite = true)
+                                    src.deleteRecursively()
+                                }
+                            } else {
+                                if (src.isDirectory) {
+                                    src.copyRecursively(dst, overwrite = true)
+                                } else {
+                                    src.copyTo(dst, overwrite = true)
+                                }
+                            }
+                            successCount++
                         }
-                        successCount++
                     }
                 } else {
                     // WebDAV -> 本地
@@ -81,7 +93,7 @@ object TransferOps {
     /**
      * 将剪贴板中的条目粘贴到目标 WebDAV 路径
      * 支持：
-     * 1. 同 WebDAV 账号 -> WebDAV 目标目录（服务端原生 COPY 指令，零流量秒级完成）
+     * 1. 同 WebDAV 账号 -> WebDAV 目标目录（服务端原生 COPY/MOVE 指令，零流量秒级完成）
      * 2. 本地 -> WebDAV 目标目录（OkHttp PUT 上传，支持文件夹递归创建与上传）
      * 3. 跨 WebDAV 账号 -> WebDAV
      */
@@ -89,7 +101,8 @@ object TransferOps {
         context: Context,
         targetAccount: WebDavAccount,
         targetDirPath: String,
-        items: List<ClipboardEntry>
+        items: List<ClipboardEntry>,
+        isCut: Boolean = false
     ): Int = withContext(Dispatchers.IO) {
         var successCount = 0
         val repo = MyApp.instance.webDavRepository
@@ -98,10 +111,22 @@ object TransferOps {
         for (item in items) {
             try {
                 val destPath = if (baseDir.isEmpty() || baseDir == "/") "/${item.entry.name}" else "$baseDir/${item.entry.name}"
+                val srcPath = if (item.entry.path.startsWith("/")) item.entry.path else "/${item.entry.path}"
+                // 同账号相同路径无需移动/复制
+                if (item.account != null && item.account.id == targetAccount.id && srcPath == destPath) {
+                    continue
+                }
                 if (item.account != null && item.account.id == targetAccount.id) {
-                    // 同 WebDAV 账号间：调用服务端原生 COPY 指令
-                    val ok = repo.copy(targetAccount, item.entry.path, destPath)
-                    if (ok) successCount++
+                    // 同 WebDAV 账号间：
+                    if (isCut) {
+                        // 服务端原生 MOVE 指令，保留修改时间
+                        val ok = repo.rename(targetAccount, item.entry.path, destPath, mtime = item.entry.lastModified)
+                        if (ok) successCount++
+                    } else {
+                        // 服务端原生 COPY 指令
+                        val ok = repo.copy(targetAccount, item.entry.path, destPath)
+                        if (ok) successCount++
+                    }
                 } else if (item.account == null) {
                     // 本地 -> WebDAV 上传
                     val src = File(item.entry.path)
@@ -111,6 +136,9 @@ object TransferOps {
                         } else {
                             repo.uploadFile(targetAccount, destPath, src)
                         }
+                        if (isCut) {
+                            src.deleteRecursively()
+                        }
                         successCount++
                     }
                 } else {
@@ -119,11 +147,16 @@ object TransferOps {
                     try {
                         val auth = "Basic " + java.util.Base64.getEncoder()
                             .encodeToString("${item.account.username}:${item.account.password}".toByteArray())
-                        val fullUrl = item.account.connectionUrl().trimEnd('/') + (if (item.entry.path.startsWith("/")) item.entry.path else "/${item.entry.path}")
+                        val fullUrl = item.account.connectionUrl().trimEnd('/') + srcPath
                         val downloaded = FileOpener.downloadToCache(MyApp.instance.okHttpClient, auth, fullUrl, tmp.name)
                         if (downloaded != null && downloaded.exists()) {
                             val ok = repo.uploadFile(targetAccount, destPath, downloaded)
-                            if (ok) successCount++
+                            if (ok) {
+                                successCount++
+                                if (isCut) {
+                                    try { repo.delete(item.account, item.entry.path) } catch (_: Exception) {}
+                                }
+                            }
                             downloaded.delete()
                         }
                     } finally {
