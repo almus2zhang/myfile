@@ -1138,6 +1138,24 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             finalIntent.putExtra("return_result", true)
                                         }
 
+                                        val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                        if (!forceChooser && defaultApp != null) {
+                                            val parts = defaultApp.split('/')
+                                            if (parts.size == 2) {
+                                                val explicit = Intent(finalIntent).apply {
+                                                    component = ComponentName(parts[0], parts[1])
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                }
+                                                currentWatchingVideoKey = if (category == "video") videoKey else null
+                                                try {
+                                                    externalLauncher.launch(explicit)
+                                                    return@launch
+                                                } catch (_: Exception) {
+                                                }
+                                            }
+                                        }
+
                                         if (!forceChooser && finalCandidates.size == 1) {
                                             val explicit = Intent(finalIntent).apply {
                                                 component = finalCandidates[0].component
