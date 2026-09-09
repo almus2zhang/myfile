@@ -1147,16 +1147,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                     flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                                                 }
-                                                if (appCtx.packageManager.resolveActivity(explicit, 0) != null) {
-                                                    currentWatchingVideoKey = if (category == "video") videoKey else null
-                                                    try {
-                                                        externalLauncher.launch(explicit)
-                                                        return@launch
-                                                    } catch (_: Exception) {
-                                                        currentWatchingVideoKey = null
-                                                    }
-                                                } else {
-                                                    MyApp.instance.appScope.launch { FileOpener.clearDefault(category) }
+                                                currentWatchingVideoKey = if (category == "video") videoKey else null
+                                                try {
+                                                    externalLauncher.launch(explicit)
+                                                    return@launch
+                                                } catch (_: Exception) {
+                                                    currentWatchingVideoKey = null
                                                 }
                                             }
                                         }
