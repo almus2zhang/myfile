@@ -1609,27 +1609,69 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
             },
             title = { Text("本地已存在同名文件") },
             text = {
+                val timeFmt = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()) }
+                val localTimeStr = remember(req.localFile) {
+                    val m = req.localFile.lastModified()
+                    if (m > 0) timeFmt.format(java.util.Date(m)) else "未知"
+                }
+                val remoteTimeStr = remember(req.entry.lastModified) {
+                    if (req.entry.lastModified > 0) timeFmt.format(java.util.Date(req.entry.lastModified)) else "未知"
+                }
+
                 Column {
                     Text(
                         text = req.entry.name,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.bodyLarge
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "本地文件大小: ${formatSize(req.localFile.length())}",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    if (req.entry.size > 0) {
-                        Text(
-                            text = "远程文件大小: ${formatSize(req.entry.size)}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                    Spacer(Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "本地已存文件 (Downloads/myfile/):",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "大小: ${formatSize(req.localFile.length())}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "时间: $localTimeStr",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            Spacer(Modifier.height(8.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(8.dp))
+
+                            Text(
+                                text = "远程文件 (WebDAV):",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "大小: ${if (req.entry.size > 0) formatSize(req.entry.size) else "未知"}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "时间: $remoteTimeStr",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text(
-                        text = if (req.isApk) "检测到本地 Downloads/myfile/ 中已存在同名安装包。要直接安装本地文件，还是从 WebDAV 重新下载最新文件？"
-                        else "检测到本地 Downloads/myfile/ 中已存在同名文件。要直接打开本地文件，还是从 WebDAV 重新下载最新文件？",
+                        text = if (req.isApk) "检测到本地已存在同名安装包。要直接安装本地文件，还是从 WebDAV 重新下载最新文件？"
+                        else "检测到本地已存在同名文件。要直接打开本地文件，还是从 WebDAV 重新下载最新文件？",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
