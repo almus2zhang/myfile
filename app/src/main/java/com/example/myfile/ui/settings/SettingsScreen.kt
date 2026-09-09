@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +29,6 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
         64L * 1024 * 1024 to "64 MB"
     )
     var customChunk by remember { mutableStateOf("") }
-    var showTrafficDebug by remember { mutableStateOf(false) }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_settings)) }) }) { padding ->
         Column(
@@ -87,82 +85,6 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 }
             }
 
-            // WebDAV 远程视频缩略图开关
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("WebDAV 远程视频缩略图", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "开启后进入网盘文件夹时尝试拉取视频首帧缩略图。注意：提取视频帧需持续从网盘拉取视频数据，会消耗网络流量与带宽（默认关闭以防偷跑流量）",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = s.loadRemoteVideoThumbnails,
-                        onCheckedChange = { vm.updateLoadRemoteVideoThumbnails(it) }
-                    )
-                }
-            }
-
-            // 视频文件时长与进度展示开关
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("显示视频时长与播放进度", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "在视频文件日期的后方展示总时长及播放进度点（例如：01:45:20 或 32:10 / 01:45:20）。本地视频与已播放视频直接本地秒级读取，0 额外网络消耗",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = s.showVideoDuration,
-                        onCheckedChange = { vm.updateShowVideoDuration(it) }
-                    )
-                }
-            }
-
-            // 实时网络传输监视器入口
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("实时网络传输监控 (Debug)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "查看当前正在进行的网络传输、实时网速、传输来源及历史请求，支持手动终止活跃连接",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Button(onClick = { showTrafficDebug = true }) {
-                        Text("打开监控")
-                    }
-                }
-            }
 
             // 分片大小
             Section(title = stringResource(R.string.settings_chunk_size)) {
@@ -293,12 +215,6 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 )
             }
         }
-    }
-
-    if (showTrafficDebug) {
-        com.example.myfile.ui.components.DebugTrafficDialog(
-            onDismiss = { showTrafficDebug = false }
-        )
     }
 }
 

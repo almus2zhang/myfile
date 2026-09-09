@@ -63,8 +63,29 @@ class WebDavViewModel : ViewModel() {
 
     val viewMode: StateFlow<ViewMode> = viewModeStore.webDavViewMode
 
+    val showThumbnailsAndDuration: StateFlow<Boolean> = viewModeStore.showThumbnailsAndDuration
+
     fun setViewMode(mode: ViewMode) {
         viewModeStore.setWebDavViewMode(mode)
+    }
+
+    fun setShowThumbnailsAndDuration(show: Boolean) {
+        viewModeStore.setShowThumbnailsAndDuration(show)
+    }
+
+    fun toggleShowThumbnailsAndDuration() {
+        val current = viewModeStore.showThumbnailsAndDuration.value
+        viewModeStore.setShowThumbnailsAndDuration(!current)
+    }
+
+    private val _durationRefreshTrigger = MutableStateFlow(0)
+    val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
+
+    fun forceRefreshDurations() {
+        if (!viewModeStore.showThumbnailsAndDuration.value) {
+            viewModeStore.setShowThumbnailsAndDuration(true)
+        }
+        _durationRefreshTrigger.value += 1
     }
 
     private fun getFolderSort(accId: Long, path: String): Pair<SortMode, Boolean> {

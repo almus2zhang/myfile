@@ -153,25 +153,31 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     val totalSpeed by com.example.myfile.core.TrafficMonitor.totalDownloadSpeed.collectAsState()
     val scope = rememberCoroutineScope()
 
-    // 方案B：详细视图(含缩略图和时长) 与 宫格视图 才探查时长与加载缩略图；普通详细视图与简洁视图不探查0流量
-    val shouldLoadMedia = (viewMode == ViewMode.DETAILS_WITH_MEDIA || viewMode == ViewMode.GRID_LARGE || viewMode == ViewMode.GRID_SMALL)
+    val showThumbnailsAndDuration by vm.showThumbnailsAndDuration.collectAsState()
+    val durationRefreshTrigger by vm.durationRefreshTrigger.collectAsState()
+    var lastProcessedTrigger by remember { mutableStateOf(0) }
+
+    // 缩略图与时长是否启用：简洁视图不显示；其余视图受 showThumbnailsAndDuration 控制
+    val shouldLoadMedia = showThumbnailsAndDuration && (viewMode != ViewMode.COMPACT)
 
     // WebDAV 视频：后台异步探查视频时长（基于轻量 HTTP Range 读取文件头与 moov 索引，0 全量下载）
-    LaunchedEffect(state.files, shouldLoadMedia) {
+    LaunchedEffect(state.files, shouldLoadMedia, durationRefreshTrigger) {
         if (!shouldLoadMedia) return@LaunchedEffect
         val acc = state.currentAccount ?: return@LaunchedEffect
         val videoEntries = state.files.filter { !it.isDirectory && FileOpener.isVideo(it.name) }
         if (videoEntries.isNotEmpty()) {
+            val isForce = (durationRefreshTrigger != lastProcessedTrigger)
+            lastProcessedTrigger = durationRefreshTrigger
             withContext(Dispatchers.IO) {
                 val auth = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString("${acc.username}:${acc.password}".toByteArray())
                 for (v in videoEntries) {
-                    val videoKey = "${acc.id}_${v.path}"
+                    val p = if (v.path.startsWith("/")) v.path else "/${v.path}"
+                    val videoKey = "acc_${acc.id}$p"
                     val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
-                    if (saved == null || saved.durationMs <= 0L) {
+                    if (isForce || saved == null || saved.durationMs <= 0L) {
                         val mmr = android.media.MediaMetadataRetriever()
                         try {
-                            val p = if (v.path.startsWith("/")) v.path else "/${v.path}"
                             val fullUrl = acc.connectionUrl().trimEnd('/') + p
                             val headers = HashMap<String, String>()
                             headers["Authorization"] = auth
@@ -459,6 +465,58 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                         }
                                     )
                                 }
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                // 是否显示缩略图和时长开关
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "显示缩略图和时长",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Image,
+                                            contentDescription = null,
+                                            tint = if (showThumbnailsAndDuration) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Checkbox(
+                                            checked = showThumbnailsAndDuration,
+                                            onCheckedChange = null
+                                        )
+                                    },
+                                    onClick = {
+                                        vm.toggleShowThumbnailsAndDuration()
+                                    }
+                                )
+
+                                // 强制重新获取时长
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "强制重新获取时长",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Refresh,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showViewModeMenu = false
+                                        android.widget.Toast.makeText(context, "正在重新获取当前目录视频时长...", android.widget.Toast.LENGTH_SHORT).show()
+                                        vm.forceRefreshDurations()
+                                    }
+                                )
                             }
                         }
 
@@ -786,7 +844,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     } else {
                         // 响应式宫格布局：详细视图与简洁视图窄屏 1 列，宽屏自适应多列；宫格视图多列排列
                         val gridCells = when (viewMode) {
-                            ViewMode.DETAILS_NO_MEDIA, ViewMode.DETAILS_WITH_MEDIA -> GridCells.Adaptive(minSize = 340.dp)
+                            ViewMode.DETAILS -> GridCells.Adaptive(minSize = 340.dp)
                             ViewMode.GRID_LARGE -> GridCells.Adaptive(minSize = 105.dp)
                             ViewMode.GRID_SMALL -> GridCells.Adaptive(minSize = 80.dp)
                             ViewMode.COMPACT -> GridCells.Adaptive(minSize = 300.dp)
@@ -1062,7 +1120,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                 }
 
                                 when (viewMode) {
-                                    ViewMode.DETAILS_NO_MEDIA, ViewMode.DETAILS_WITH_MEDIA -> {
+                                    ViewMode.DETAILS -> {
                                         Column {
                                             FileListItem(
                                                 entry = entry,
@@ -1283,7 +1341,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
 
     // 属性对话框
     propertiesEntry?.let { entry ->
-        val videoKey = state.currentAccount?.let { "${it.id}_${entry.path}" } ?: entry.path
+        val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
+        val videoKey = state.currentAccount?.let { "acc_${it.id}$p" } ?: entry.path
         val vProg = progressMap[videoKey]
         com.example.myfile.ui.components.FilePropertiesDialog(
             entry = entry,

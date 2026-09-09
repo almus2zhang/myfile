@@ -13,17 +13,29 @@ class ViewModeStore(context: Context) {
     private val _webDavViewMode = MutableStateFlow(loadWebDavMode())
     val webDavViewMode: StateFlow<ViewMode> = _webDavViewMode.asStateFlow()
 
+    private val _showThumbnailsAndDuration = MutableStateFlow(loadShowThumbnailsAndDuration())
+    val showThumbnailsAndDuration: StateFlow<Boolean> = _showThumbnailsAndDuration.asStateFlow()
+
     private fun loadWebDavMode(): ViewMode {
-        val name = prefs.getString("webdav_view_mode", ViewMode.DETAILS_WITH_MEDIA.name)
+        val name = prefs.getString("webdav_view_mode", ViewMode.DETAILS.name)
         return try {
-            ViewMode.valueOf(name ?: ViewMode.DETAILS_WITH_MEDIA.name)
+            ViewMode.valueOf(name ?: ViewMode.DETAILS.name)
         } catch (_: Exception) {
-            ViewMode.DETAILS_WITH_MEDIA
+            ViewMode.DETAILS
         }
     }
 
     fun setWebDavViewMode(mode: ViewMode) {
         prefs.edit().putString("webdav_view_mode", mode.name).apply()
         _webDavViewMode.value = mode
+    }
+
+    private fun loadShowThumbnailsAndDuration(): Boolean {
+        return prefs.getBoolean("show_thumbnails_and_duration", true)
+    }
+
+    fun setShowThumbnailsAndDuration(show: Boolean) {
+        prefs.edit().putBoolean("show_thumbnails_and_duration", show).apply()
+        _showThumbnailsAndDuration.value = show
     }
 }

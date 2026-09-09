@@ -438,7 +438,7 @@ object ThumbnailManager {
             val dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             if (dur > 0L) {
                 try {
-                    val videoKey = "${account.id}_${entry.path}"
+                    val videoKey = "acc_${account.id}$p"
                     val existing = MyApp.instance.db.videoProgressDao().get(videoKey)
                     MyApp.instance.db.videoProgressDao().save(
                         com.example.myfile.data.db.entity.VideoProgressEntity(
