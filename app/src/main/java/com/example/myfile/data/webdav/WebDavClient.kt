@@ -53,27 +53,22 @@ class WebDavClient(
     private fun fullUrl(path: String): String {
         val base = getEffectiveBaseUrl().trim().trimEnd('/')
         val p = if (path.startsWith("/")) path else "/$path"
-        // 用 HttpUrl 解析 + 重组，自动 URL 编码
         return try {
             val httpUrl = base.toHttpUrlOrNull()
             if (httpUrl != null) {
-                val basePath = httpUrl.encodedPath.trimEnd('/')
-                httpUrl.newBuilder()
-                    .encodedPath(basePath + p)
-                    .build()
-                    .toString()
-            } else {
-                val baseUri = java.net.URI(base)
-                okhttp3.HttpUrl.Builder()
-                    .scheme(if (base.startsWith("https")) "https" else "http")
-                    .host(baseUri.host ?: return base + p)
-                    .apply {
-                        val port = baseUri.port
-                        if (port > 0) port(port)
+                val builder = httpUrl.newBuilder()
+                if (p != "/") {
+                    val segments = p.split('/').filter { it.isNotEmpty() }
+                    for (seg in segments) {
+                        builder.addPathSegment(seg)
                     }
-                    .encodedPath((baseUri.path ?: "/").trimEnd('/') + p)
-                    .build()
-                    .toString()
+                    if (path.endsWith("/") && !builder.build().encodedPath.endsWith("/")) {
+                        builder.addPathSegment("")
+                    }
+                }
+                builder.build().toString()
+            } else {
+                base + p
             }
         } catch (e: Exception) {
             Log.w("WebDavClient", "fullUrl error, fallback string concat: ${e.message}")
@@ -84,8 +79,8 @@ class WebDavClient(
     /** 基础 URL，规范化（确保有尾斜杠，方便拼接子路径） */
     val rootUrl: String get() = fullUrl("/")
 
-    private fun requestBuilder(method: String, path: String): Request.Builder =
-        Request.Builder()
+    private fun requestBuilder(method: String, path: String, body: RequestBody? = null): Request.Builder {
+        val b = Request.Builder()
             .url(fullUrl(path))
             .header("Authorization", authHeader)
             // 与 CX 文件浏览器完全一致：用 Android 系统默认的 Dalvik UA（非浏览器 UA），
@@ -93,7 +88,13 @@ class WebDavClient(
             .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 15; V2309A Build/AP3A.240905.015.A1)")
             .header("Accept-Encoding", "gzip")
             .header("Connection", "Keep-Alive")
-            .method(method, null)
+        if (body != null) {
+            b.method(method, body)
+        } else if (method != "PUT" && method != "POST" && method != "PATCH") {
+            b.method(method, null)
+        }
+        return b
+    }
 
     /** 探测服务器 WebDAV 能力（OPTIONS），不抛异常 */
     fun probe(): String = try {
@@ -305,20 +306,19 @@ class WebDavClient(
 
     fun uploadFile(path: String, file: java.io.File): Boolean {
         val body = okhttp3.RequestBody.create("application/octet-stream".toMediaType(), file)
-        val req = requestBuilder("PUT", path).put(body).build()
+        val req = requestBuilder("PUT", path, body).build()
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
     }
 
     fun upload(path: String, bytes: ByteArray): Boolean {
-        val req = requestBuilder("PUT", path)
-            .put(bytes.toRequestBody("application/octet-stream".toMediaType()))
-            .build()
+        val body = bytes.toRequestBody("application/octet-stream".toMediaType())
+        val req = requestBuilder("PUT", path, body).build()
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
     }
 
     /** 上传大文件用 RequestBody 流式 */
     fun uploadStream(path: String, body: RequestBody): Boolean {
-        val req = requestBuilder("PUT", path).put(body).build()
+        val req = requestBuilder("PUT", path, body).build()
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
     }
 

@@ -131,15 +131,18 @@ object TransferOps {
                     // 本地 -> WebDAV 上传
                     val src = File(item.entry.path)
                     if (src.exists()) {
-                        if (src.isDirectory) {
+                        val ok = if (src.isDirectory) {
                             uploadLocalDirectory(repo, targetAccount, src, destPath)
+                            true
                         } else {
                             repo.uploadFile(targetAccount, destPath, src)
                         }
-                        if (isCut) {
-                            src.deleteRecursively()
+                        if (ok) {
+                            if (isCut) {
+                                src.deleteRecursively()
+                            }
+                            successCount++
                         }
-                        successCount++
                     }
                 } else {
                     // 跨 WebDAV 账号：先下载临时缓存再上传

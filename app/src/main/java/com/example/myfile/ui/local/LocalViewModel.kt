@@ -186,12 +186,22 @@ class LocalViewModel : ViewModel() {
         val isCut = com.example.myfile.core.TransferClipboard.isCut
         val targetDir = _state.value.currentDir
         viewModelScope.launch {
-            val count = com.example.myfile.core.TransferOps.pasteToLocal(context, targetDir, items, isCut = isCut)
-            if (isCut) {
+            _state.value = _state.value.copy(isRefreshing = true)
+            var count = 0
+            try {
+                count = com.example.myfile.core.TransferOps.pasteToLocal(context, targetDir, items, isCut = isCut)
+            } catch (e: Exception) {
+                android.util.Log.e("LocalVM", "pasteHere error", e)
+            } finally {
                 com.example.myfile.core.TransferClipboard.clear()
+                _state.value = _state.value.copy(
+                    selected = emptySet(),
+                    multiSelectMode = false,
+                    isRefreshing = false,
+                    message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项"
+                )
+                refresh()
             }
-            _state.value = _state.value.copy(message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项")
-            refresh()
         }
     }
 

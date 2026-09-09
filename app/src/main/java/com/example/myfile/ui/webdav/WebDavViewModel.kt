@@ -315,16 +315,22 @@ class WebDavViewModel : ViewModel() {
         val targetPath = _state.value.currentPath
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true)
-            val count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items, isCut = isCut)
-            com.example.myfile.core.TransferClipboard.clear()
-            _state.value = _state.value.copy(
-                loading = false,
-                selected = emptySet(),
-                multiSelectMode = false,
-                message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项"
-            )
-            onDone?.invoke()
-            refresh()
+            var count = 0
+            try {
+                count = com.example.myfile.core.TransferOps.pasteToWebDav(context, acc, targetPath, items, isCut = isCut)
+            } catch (e: Exception) {
+                android.util.Log.e("WebDavVM", "pasteHere error", e)
+            } finally {
+                com.example.myfile.core.TransferClipboard.clear()
+                _state.value = _state.value.copy(
+                    loading = false,
+                    selected = emptySet(),
+                    multiSelectMode = false,
+                    message = if (isCut) "已移动 $count 项" else "已粘贴 $count 项"
+                )
+                onDone?.invoke()
+                refresh()
+            }
         }
     }
 
