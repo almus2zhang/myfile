@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfile.MyApp
+import com.example.myfile.core.ApkInstaller
 import com.example.myfile.core.AppCandidate
 import com.example.myfile.core.FileOpener
 import com.example.myfile.core.StreamProxy
@@ -915,13 +916,22 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                 originalPath = entry.path
                                             )
                                         } else {
-                                            val tmp = FileOpener.downloadToCache(
-                                                client = com.example.myfile.MyApp.instance.okHttpClient,
-                                                authHeader = auth ?: "",
-                                                url = fullUrl,
-                                                fileName = entry.name
-                                            ) ?: return@launch
-                                            FileOpener.buildLocalViewIntent(appCtx, tmp)
+                                            val dir = File(
+                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                "myfile"
+                                            )
+                                            val downloadedFile = File(dir, entry.name)
+                                            val fileToOpen = if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
+                                                downloadedFile
+                                            } else {
+                                                FileOpener.downloadToCache(
+                                                    client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                    authHeader = auth ?: "",
+                                                    url = fullUrl,
+                                                    fileName = entry.name
+                                                ) ?: return@launch
+                                            }
+                                            FileOpener.buildLocalViewIntent(appCtx, fileToOpen)
                                         }
                                         if (intent == null) {
                                             if (isVid && fakeAvi && streamRemotePath != entry.path) {
@@ -964,24 +974,17 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                             finalIntent.putExtra("return_result", true)
                                         }
 
-                                        val defaultApp = MyApp.instance.defaultAppStore.get(category)
-                                        if (!forceChooser && defaultApp != null) {
-                                            val parts = defaultApp.split('/')
-                                            if (parts.size == 2) {
-                                                val explicit = Intent(finalIntent).apply {
-                                                    component = ComponentName(parts[0], parts[1])
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
-                                                }
-                                                currentWatchingVideoKey = if (category == "video") videoKey else null
-                                                try {
-                                                    externalLauncher.launch(explicit)
-                                                    return@launch
-                                                } catch (_: Exception) {
-                                                    if (isVid && fakeAvi && streamRemotePath != entry.path) {
-                                                        MyApp.instance.downloadManager.finishStreamingRename(entry.path)
-                                                    }
-                                                }
+                                        if (!forceChooser && finalCandidates.size == 1) {
+                                            val explicit = Intent(finalIntent).apply {
+                                                component = finalCandidates[0].component
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                            }
+                                            currentWatchingVideoKey = if (category == "video") videoKey else null
+                                            try {
+                                                externalLauncher.launch(explicit)
+                                                return@launch
+                                            } catch (_: Exception) {
                                             }
                                         }
 
@@ -995,36 +998,37 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     }
                                 }
 
+                                fun startAcceleratedDownload(entryToDownload: FileEntry) {
+                                    if (acc == null) return
+                                    scope.launch {
+                                        try {
+                                            com.example.myfile.core.download.DownloadService.start(MyApp.instance)
+                                            val dir = File(
+                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                "myfile"
+                                            )
+                                            if (!dir.exists()) dir.mkdirs()
+                                            val taskId = MyApp.instance.downloadManager.startDownload(
+                                                acc,
+                                                entryToDownload.path,
+                                                entryToDownload.name,
+                                                dir,
+                                                knownSize = entryToDownload.size
+                                            )
+                                            downloadingApkFileName = entryToDownload.name
+                                            downloadingApkTaskId = taskId
+                                        } catch (e: Exception) {
+                                            snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
+                                        }
+                                    }
+                                }
+
                                 val onItemClick = {
                                     if (state.multiSelectMode) {
                                         vm.toggleSelect(entry.path)
                                     } else if (entry.isDirectory) {
                                         vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
                                         vm.open(entry)
-                                    } else if (category == "apk") {
-                                        if (acc != null) {
-                                            scope.launch {
-                                                try {
-                                                    com.example.myfile.core.download.DownloadService.start(MyApp.instance)
-                                                    val dir = File(
-                                                        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                                                        "myfile"
-                                                    )
-                                                    if (!dir.exists()) dir.mkdirs()
-                                                    val taskId = MyApp.instance.downloadManager.startDownload(
-                                                        acc,
-                                                        entry.path,
-                                                        entry.name,
-                                                        dir,
-                                                        knownSize = entry.size
-                                                    )
-                                                    downloadingApkFileName = entry.name
-                                                    downloadingApkTaskId = taskId
-                                                } catch (e: Exception) {
-                                                    snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
-                                                }
-                                            }
-                                        }
                                     } else if (category == "image") {
                                         val idx = imageEntries.indexOfFirst { it.path == entry.path }
                                         if (idx >= 0) viewingImageIndex = idx
@@ -1032,6 +1036,23 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                     } else if (FileOpener.isText(entry.name)) {
                                         // 内置文本浏览和编辑器
                                         editingTextEntry = entry
+                                    } else if (category == "video") {
+                                        openEntry(forceChooser = false)
+                                    } else if (category == "apk" || entry.size > 5 * 1024 * 1024L) {
+                                        // apk 或大于 5M 的其他文件采用加速下载方式
+                                        val localDownloaded = File(
+                                            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "myfile"),
+                                            entry.name
+                                        )
+                                        if (localDownloaded.exists() && (entry.size <= 0 || localDownloaded.length() == entry.size)) {
+                                            if (category == "apk") {
+                                                ApkInstaller.install(context, localDownloaded)
+                                            } else {
+                                                openEntry(forceChooser = false)
+                                            }
+                                        } else {
+                                            startAcceleratedDownload(entry)
+                                        }
                                     } else {
                                         openEntry(forceChooser = false)
                                     }
@@ -1084,9 +1105,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                                                         leadingIcon = { Icon(Icons.Filled.Download, null) },
                                                         onClick = {
                                                             showMenu = false
-                                                            state.currentAccount?.let { a ->
-                                                                vm.downloadFile(a, entry)
-                                                            }
+                                                            startAcceleratedDownload(entry)
                                                         }
                                                     )
                                                 }

@@ -40,6 +40,34 @@ object FileOpener {
         }
     }
 
+    /** 直接打开本地文件（自动使用候选程序或系统选择器） */
+    fun open(context: Context, file: File): Boolean {
+        val intent = buildLocalViewIntent(context, file) ?: return false
+        val candidates = resolveCandidates(context, intent)
+        return try {
+            if (candidates.size == 1) {
+                val explicit = Intent(intent).apply {
+                    component = candidates[0].component
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(explicit)
+            } else {
+                openWithSystemChooser(context, intent, "打开文件")
+            }
+            true
+        } catch (e: Exception) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                true
+            } catch (e2: Exception) {
+                Log.e("FileOpener", "open file failed", e2)
+                false
+            }
+        }
+    }
+
     /** 构造远程视频的流式打开意图（本地 http://127.0.0.1 链接） */
     fun buildVideoStreamIntent(
         client: OkHttpClient,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +22,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.myfile.MyApp
 import com.example.myfile.core.ApkInstaller
+import com.example.myfile.core.FileOpener
 import java.io.File
 import java.util.Locale
 
@@ -55,18 +57,23 @@ fun ApkDownloadDialog(
         }
     }
 
-    // 监听完成并自动安装
-    var hasInstalled by remember { mutableStateOf(false) }
+    // 监听完成并自动安装 / 打开
+    var hasHandledCompletion by remember { mutableStateOf(false) }
     LaunchedEffect(task?.status, task?.downloadedBytes, task?.totalBytes) {
         val currentTask = task ?: return@LaunchedEffect
         val isCompleted = currentTask.status == "COMPLETED" ||
                 (currentTask.totalBytes > 0 && currentTask.downloadedBytes >= currentTask.totalBytes)
-        if (isCompleted && !hasInstalled) {
-            hasInstalled = true
-            Toast.makeText(context, "下载完成，正在调起安装器...", Toast.LENGTH_SHORT).show()
+        if (isCompleted && !hasHandledCompletion) {
+            hasHandledCompletion = true
             val file = File(currentTask.localPath)
             if (file.exists()) {
-                ApkInstaller.install(context, file)
+                if (fileName.endsWith(".apk", ignoreCase = true)) {
+                    Toast.makeText(context, "下载完成，正在调起安装器...", Toast.LENGTH_SHORT).show()
+                    ApkInstaller.install(context, file)
+                } else {
+                    Toast.makeText(context, "下载完成，正在打开文件...", Toast.LENGTH_SHORT).show()
+                    FileOpener.open(context, file)
+                }
             }
             onDismissRequest()
         }
@@ -88,6 +95,12 @@ fun ApkDownloadDialog(
                     .fillMaxWidth()
                     .padding(20.dp)
             ) {
+                val isApk = fileName.endsWith(".apk", ignoreCase = true)
+                val titleText = if (isApk) "加速下载安装包" else "加速下载文件"
+                val headerIcon = if (isApk) Icons.Filled.Android else Icons.Filled.Download
+                val headerBg = if (isApk) Color(0xFF43A047).copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                val headerTint = if (isApk) Color(0xFF43A047) else MaterialTheme.colorScheme.primary
+
                 // 顶部：图标 + 标题
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -97,20 +110,20 @@ fun ApkDownloadDialog(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF43A047).copy(alpha = 0.14f)),
+                            .background(headerBg),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Android,
+                            imageVector = headerIcon,
                             contentDescription = null,
-                            tint = Color(0xFF43A047),
+                            tint = headerTint,
                             modifier = Modifier.size(26.dp)
                         )
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "加速下载安装包",
+                            text = titleText,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
