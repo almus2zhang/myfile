@@ -16,8 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
 import com.example.myfile.ui.nav.AppNavigation
 import com.example.myfile.ui.theme.MyfileTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,6 +30,7 @@ class MainActivity : ComponentActivity() {
                     val hasPermission = remember { mutableStateOf(checkStoragePermission()) }
                     if (hasPermission.value) {
                         AppNavigation()
+                        PendingRenameDialog()
                     } else {
                         PermissionScreen(onGranted = { hasPermission.value = true })
                     }
@@ -71,5 +74,58 @@ private fun PermissionScreen(onGranted: () -> Unit) {
                 onGranted()
             }
         }) { Text("去授权") }
+    }
+}
+
+/**
+ * 启动时检测上次「改名下载/播放」未改回的残留记录，弹窗提示用户。
+ * 用户可选择「立即恢复」或「忽略」。
+ */
+@Composable
+private fun PendingRenameDialog() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pendingRenames by MyApp.instance.downloadManager.pendingRenames
+        .collectAsState()
+
+    val hasShown = remember { mutableStateOf(false) }
+
+    // 仅在首次检测到残留记录时弹出（用 hasShown 防止重复弹）
+    if (pendingRenames.isNotEmpty() && !hasShown.value) {
+        val names = pendingRenames.joinToString("\n") { "· ${it.fileName}" }
+        AlertDialog(
+            onDismissRequest = {
+                hasShown.value = true
+            },
+            title = { Text("检测到未改回的文件") },
+            text = {
+                Column {
+                    Text("上次改名下载/播放时，以下文件因中断未能改回原文件名：")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        names,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    hasShown.value = true
+                    // 在 IO 线程执行恢复（涉及网络 MOVE）
+                    MyApp.instance.appScope.launch {
+                        MyApp.instance.downloadManager.recoverPendingRenames()
+                    }
+                }) { Text("立即恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    hasShown.value = true
+                    // 忽略：仅清除本地记录，服务器文件名保持 .avi
+                    pendingRenames.forEach { it ->
+                        MyApp.instance.downloadManager.dismissPendingRename(it.tmpPath)
+                    }
+                }) { Text("忽略") }
+            }
+        )
     }
 }

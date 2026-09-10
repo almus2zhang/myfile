@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -45,14 +46,26 @@ class DownloadManager(
     private val mutex = Mutex()
     private val renamePrefs = context.getSharedPreferences("download_pending_renames", Context.MODE_PRIVATE)
 
+    /** 待改回原名的残留记录（上次 App 被杀/断网导致改名未改回） */
+    data class PendingRenameInfo(
+        val tmpPath: String,
+        val originalPath: String,
+        val fileName: String
+    )
+
+    private val _pendingRenames = MutableStateFlow<List<PendingRenameInfo>>(emptyList())
+    val pendingRenames: StateFlow<List<PendingRenameInfo>> = _pendingRenames.asStateFlow()
+
     init {
-        recoverPendingRenames()
+        // 静默自动恢复上次遗留的「未改回」记录；仅当恢复失败时才暴露给 UI 弹窗提示
         scope.launch {
             try {
                 taskDao.fixStuckCompletedTasks()
             } catch (e: Exception) {
                 Log.e(TAG, "fixStuckCompletedTasks error", e)
             }
+            // 自动恢复残留改名（成功则静默清除，失败则保留到 pendingRenames 供弹窗）
+            recoverSilently()
         }
     }
 
@@ -173,35 +186,101 @@ class DownloadManager(
     }
 
     /**
-     * 自动恢复机制：若之前改名下载过程中程序闪退、被系统强杀或断网中断，
-     * 在重新启动或初始化时自动将服务器端残留的 .avi 临时文件名改回原始文件名。
+     * 扫描上次遗留的「未改回」改名记录，填充到 pendingRenames 供 UI 弹窗提示。
      */
-    fun recoverPendingRenames() {
-        scope.launch {
+    private fun scanPendingRenames() {
+        try {
             val all = renamePrefs.all
-            if (all.isEmpty()) return@launch
-            DownloadLog.log(TAG, "recovering ${all.size} pending renames...")
-            for ((tmpPath, value) in all) {
-                val jsonStr = value as? String ?: continue
+            val list = all.mapNotNull { (tmpPath, value) ->
+                val jsonStr = value as? String ?: return@mapNotNull null
                 try {
                     val obj = org.json.JSONObject(jsonStr)
                     val originalPath = obj.getString("originalPath")
-                    val acc = com.example.myfile.model.WebDavAccount(
-                        id = obj.optLong("accountId", 0L),
-                        name = "Recover",
-                        url = obj.getString("url"),
-                        username = obj.getString("username"),
-                        password = obj.getString("password")
+                    PendingRenameInfo(
+                        tmpPath = tmpPath,
+                        originalPath = originalPath,
+                        fileName = originalPath.substringAfterLast('/')
                     )
-                    val client = clientProvider(acc)
-                    val ok = client.move(tmpPath, originalPath)
-                    DownloadLog.log(TAG, "recovered pending rename: $tmpPath -> $originalPath, result=$ok")
-                    removePendingRename(tmpPath)
-                } catch (e: Exception) {
-                    DownloadLog.log(TAG, "failed recovering pending rename $tmpPath: ${e.message}")
+                } catch (_: Exception) {
+                    null
                 }
             }
+            _pendingRenames.value = list
+        } catch (_: Exception) {}
+    }
+
+    /** 重新扫描（比如用户处理了部分后） */
+    fun refreshPendingRenames() = scanPendingRenames()
+
+    /**
+     * 静默自动恢复：启动时尝试把所有残留改名改回原名。
+     * 成功的记录清除（静默）；失败的保留在 pendingRenames 供 UI 弹窗提示。
+     */
+    private fun recoverSilently() {
+        val all = renamePrefs.all
+        if (all.isEmpty()) return
+        DownloadLog.log(TAG, "静默恢复 ${all.size} 条残留改名...")
+        for ((tmpPath, value) in all) {
+            val jsonStr = value as? String ?: continue
+            try {
+                val obj = org.json.JSONObject(jsonStr)
+                val originalPath = obj.getString("originalPath")
+                val acc = com.example.myfile.model.WebDavAccount(
+                    id = obj.optLong("accountId", 0L),
+                    name = "Recover",
+                    url = obj.getString("url"),
+                    username = obj.getString("username"),
+                    password = obj.getString("password")
+                )
+                val client = clientProvider(acc)
+                val ok = client.move(tmpPath, originalPath)
+                DownloadLog.log(TAG, "静默恢复: $tmpPath -> $originalPath, result=$ok")
+                removePendingRename(tmpPath)
+            } catch (e: Exception) {
+                DownloadLog.log(TAG, "静默恢复失败 $tmpPath: ${e.message}")
+            }
         }
+        // 恢复结束后重新扫描：剩余未成功的记录暴露给 UI 弹窗
+        scanPendingRenames()
+    }
+
+    /**
+     * 由 UI 触发的重试恢复（用户点了「立即恢复」）。
+     * @return 恢复成功的条数
+     */
+    fun recoverPendingRenames(): Int {
+        val items = _pendingRenames.value
+        if (items.isEmpty()) return 0
+        var okCount = 0
+        for (item in items) {
+            try {
+                val jsonStr = renamePrefs.getString(item.tmpPath, null) ?: continue
+                val obj = org.json.JSONObject(jsonStr)
+                val originalPath = obj.getString("originalPath")
+                val acc = com.example.myfile.model.WebDavAccount(
+                    id = obj.optLong("accountId", 0L),
+                    name = "Recover",
+                    url = obj.getString("url"),
+                    username = obj.getString("username"),
+                    password = obj.getString("password")
+                )
+                val client = clientProvider(acc)
+                val ok = client.move(item.tmpPath, originalPath)
+                DownloadLog.log(TAG, "recovered pending rename: ${item.tmpPath} -> $originalPath, result=$ok")
+                removePendingRename(item.tmpPath)
+                if (ok) okCount++
+            } catch (e: Exception) {
+                DownloadLog.log(TAG, "failed recovering pending rename ${item.tmpPath}: ${e.message}")
+            }
+        }
+        scanPendingRenames()
+        return okCount
+    }
+
+    /** 放弃某条残留记录（用户选择不恢复），仅清除本地记录，不动服务器文件 */
+    fun dismissPendingRename(tmpPath: String) {
+        removePendingRename(tmpPath)
+        scanPendingRenames()
     }
 
     data class StreamingRename(
@@ -270,10 +349,11 @@ class DownloadManager(
         val p = if (remotePath.startsWith("/")) remotePath else "/$remotePath"
         val dir = p.substringBeforeLast('/', "")
         val name = p.substringAfterLast('/')
-        // 去掉原扩展名后加 .avi，并加时间戳避免重名
+        // 去掉原扩展名后加 .avi，并用「纳秒时间戳 + 随机数」保证几乎不可能与已有文件重名
         val base = name.substringBeforeLast('.', name)
-        val ts = System.currentTimeMillis() % 100000
-        return if (dir.isEmpty() || dir == "/") "/$base.mf$ts.avi" else "$dir/$base.mf$ts.avi"
+        val ts = System.nanoTime() % 1_000_000_000L
+        val rand = java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000)
+        return if (dir.isEmpty() || dir == "/") "/$base.mf$ts$rand.avi" else "$dir/$base.mf$ts$rand.avi"
     }
 
     private fun launchEngine(

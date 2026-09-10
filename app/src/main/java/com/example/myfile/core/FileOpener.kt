@@ -49,6 +49,7 @@ object FileOpener {
                 val explicit = Intent(intent).apply {
                     component = candidates[0].component
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 context.startActivity(explicit)
@@ -59,6 +60,7 @@ object FileOpener {
         } catch (e: Exception) {
             try {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 context.startActivity(intent)
                 true
             } catch (e2: Exception) {

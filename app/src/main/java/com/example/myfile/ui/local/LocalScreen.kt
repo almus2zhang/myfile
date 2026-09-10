@@ -51,7 +51,12 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocalScreen(vm: LocalViewModel = viewModel()) {
+fun LocalScreen(
+    vm: LocalViewModel = viewModel(),
+    onBack: (() -> Unit)? = null,
+    accounts: List<com.example.myfile.model.WebDavAccount> = emptyList(),
+    onSwitchToWebDav: ((com.example.myfile.model.WebDavAccount) -> Unit)? = null
+) {
     val state by vm.state.collectAsState()
     val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -78,6 +83,10 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
     var openWithRequest by remember { mutableStateOf<LocalOpenWithRequest?>(null) }
     var showTrafficDebug by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showTransferDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showSourceMenu by remember { mutableStateOf(false) }
 
     var showViewModeMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -211,12 +220,14 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     val isRoot = vm.isAtRoot(state.currentDir)
     val localCrumbs = remember(state.currentDir) { buildLocalCrumbs(vm.rootDir, state.currentDir) }
 
-    BackHandler(enabled = !isRoot || state.multiSelectMode) {
+    BackHandler(enabled = !isRoot || state.multiSelectMode || onBack != null) {
         if (state.multiSelectMode) {
             vm.clearSelection()
-        } else {
+        } else if (!isRoot) {
             vm.saveScrollPosition(state.currentDir.absolutePath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
             vm.goUp()
+        } else {
+            onBack?.invoke()
         }
     }
 
@@ -231,14 +242,97 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "内部存储",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 6.dp)
-                    )
+                    // 左侧标题：带下箭头的下拉按钮，可切换到任意 WebDAV 配置或留在本地存储
+                    Box {
+                        Surface(
+                            onClick = { showSourceMenu = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "本地存储",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 120.dp)
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Filled.ArrowDropDown,
+                                    contentDescription = "切换来源",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showSourceMenu,
+                            onDismissRequest = { showSourceMenu = false }
+                        ) {
+                            // 顶部：本地存储（当前项，点击关闭菜单留在本地）
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "📱 本地存储",
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.PhoneAndroid,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = { showSourceMenu = false }
+                            )
+                            HorizontalDivider()
+
+                            accounts.forEach { acc ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (acc.isDynamic) {
+                                                Icon(
+                                                    Icons.Filled.SyncAlt,
+                                                    contentDescription = "动态解析",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                            }
+                                            Text(
+                                                acc.name,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.Cloud,
+                                            null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showSourceMenu = false
+                                        onSwitchToWebDav?.invoke(acc)
+                                    }
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(Modifier.width(4.dp))
 
@@ -369,28 +463,6 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                     }
 
                     Spacer(Modifier.weight(1f))
-                    if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
-                        Surface(
-                            onClick = { showTrafficDebug = true },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 7.dp)
-                            ) {
-                                Icon(Icons.Filled.Speed, contentDescription = "网速", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text(
-                                    text = com.example.myfile.ui.components.formatSpeed(totalSpeed),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(2.dp))
-                    }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -450,13 +522,61 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
                                 }
                             }
                         }
-                        IconButton(onClick = { showTrafficDebug = true }, modifier = Modifier.size(40.dp)) {
-                            BadgedBox(badge = { if (activeTransfers.isNotEmpty()) Badge { Text("${activeTransfers.size}") } }) {
-                                Icon(Icons.Filled.Speed, "网络传输监控", modifier = Modifier.size(24.dp))
+                        // 三点菜单（含角标）
+                        Box {
+                            IconButton(
+                                onClick = { showMoreMenu = true },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                BadgedBox(
+                                    badge = {
+                                        if (activeTransfers.isNotEmpty()) {
+                                            Badge { Text("${activeTransfers.size}") }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Filled.MoreVert, "更多", modifier = Modifier.size(24.dp))
+                                }
                             }
-                        }
-                        IconButton(onClick = { vm.refresh() }, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Filled.Refresh, "刷新", modifier = Modifier.size(24.dp))
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("网络传输监控器") },
+                                    leadingIcon = {
+                                        BadgedBox(
+                                            badge = {
+                                                if (activeTransfers.isNotEmpty()) {
+                                                    Badge { Text("${activeTransfers.size}") }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Filled.Speed, null, modifier = Modifier.size(20.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showTrafficDebug = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("传输") },
+                                    leadingIcon = { Icon(Icons.Filled.SwapVert, null, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showTransferDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("设置") },
+                                    leadingIcon = { Icon(Icons.Filled.Settings, null, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showSettingsDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -515,14 +635,55 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f), modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                    localCrumbs.forEachIndexed { index, crumb ->
-                        if (index > 0) {
-                            Text(text = "›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        localCrumbs.forEachIndexed { index, crumb ->
+                            if (index > 0) {
+                                Text(text = "›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 2.dp))
+                            }
+                            val isCurrent = index == localCrumbs.lastIndex
+                            Surface(shape = RoundedCornerShape(6.dp), color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent, modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { if (!isCurrent) { vm.saveScrollPosition(state.currentDir.absolutePath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset); vm.navigateTo(crumb.file) } }) {
+                                Text(text = crumb.name, color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
                         }
-                        val isCurrent = index == localCrumbs.lastIndex
-                        Surface(shape = RoundedCornerShape(6.dp), color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent, modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { if (!isCurrent) { vm.saveScrollPosition(state.currentDir.absolutePath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset); vm.navigateTo(crumb.file) } }) {
-                            Text(text = crumb.name, color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    }
+
+                    // 实时速度徽章（固定在右侧，不随面包屑滚动）
+                    if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
+                        Surface(
+                            onClick = { showTrafficDebug = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .padding(end = 8.dp, top = 3.dp, bottom = 3.dp)
+                                .height(22.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Speed,
+                                    contentDescription = "网速",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(Modifier.width(3.dp))
+                                Text(
+                                    text = com.example.myfile.ui.components.formatSpeed(totalSpeed),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
                     }
                 }
@@ -705,6 +866,12 @@ fun LocalScreen(vm: LocalViewModel = viewModel()) {
     }
     if (showTrafficDebug) {
         com.example.myfile.ui.components.DebugTrafficDialog(onDismiss = { showTrafficDebug = false })
+    }
+    if (showTransferDialog) {
+        com.example.myfile.ui.transfer.TransferScreenDialog(onDismiss = { showTransferDialog = false })
+    }
+    if (showSettingsDialog) {
+        com.example.myfile.ui.settings.SettingsScreenDialog(onDismiss = { showSettingsDialog = false })
     }
     renamingEntry?.let { entry ->
         com.example.myfile.ui.components.FileRenameDialog(entry = entry, onDismiss = { renamingEntry = null }, onConfirm = { newName -> vm.rename(entry, newName) })

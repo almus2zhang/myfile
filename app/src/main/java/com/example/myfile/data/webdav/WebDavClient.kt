@@ -281,6 +281,12 @@ class WebDavClient(
     }
 
     fun delete(path: String): Boolean {
+        // 安全防护：拒绝删除根目录（path 为空或 "/"），防止路径计算错误导致误删整个账户
+        val normalized = path.trim().trimEnd('/')
+        if (normalized.isEmpty()) {
+            Log.w("WebDavClient", "拒绝删除根目录 (path=\"$path\")，已阻止误删")
+            return false
+        }
         val req = requestBuilder("DELETE", path).build()
         client.newCall(req).execute().use { return it.isSuccessful || it.code == 204 }
     }

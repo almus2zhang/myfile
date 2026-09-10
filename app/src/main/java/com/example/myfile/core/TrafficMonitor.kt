@@ -75,6 +75,10 @@ object TrafficMonitor {
     private val _totalDownloadSpeed = MutableStateFlow(0L)
     val totalDownloadSpeed: StateFlow<Long> = _totalDownloadSpeed.asStateFlow()
 
+    /** 速度历史：(时间戳ms, 速度bytes/s)，保留最近 5 分钟 */
+    private val _speedHistory = MutableStateFlow<List<Pair<Long, Long>>>(emptyList())
+    val speedHistory: StateFlow<List<Pair<Long, Long>>> = _speedHistory.asStateFlow()
+
     private val recordsMap = ConcurrentHashMap<Long, TrafficRecord>()
     private val speedTrackingMap = ConcurrentHashMap<Long, SpeedSample>()
 
@@ -124,6 +128,12 @@ object TrafficMonitor {
 
         _totalDownloadSpeed.value = totalSpeed
         _activeTransfers.value = activeList.sortedByDescending { it.id }
+
+        // 追加速度历史采样（保留最近 5 分钟）
+        val now2 = System.currentTimeMillis()
+        val cutoff = now2 - 300_000L
+        val newHistory = (_speedHistory.value + (now2 to totalSpeed)).filter { it.first >= cutoff }
+        _speedHistory.value = newHistory
     }
 
     fun clearHistory() {
@@ -146,20 +156,9 @@ object TrafficMonitor {
             val curLogs = _debugLogs.value.toMutableList()
             curLogs.add(0, formattedMsg)
             _debugLogs.value = if (curLogs.size > 200) curLogs.take(200) else curLogs
-
-            val record = TrafficRecord(
-                id = idCounter.getAndIncrement(),
-                method = "DBG",
-                url = formattedMsg,
-                displayUrl = formattedMsg,
-                category = "[调试]",
-                status = TransferState.COMPLETED
-            ).also { it.endTime = System.currentTimeMillis() }
-            val cur = _recentTransfers.value.toMutableList()
-            cur.add(0, record)
-            _recentTransfers.value = if (cur.size > 100) cur.take(100) else cur
         }
     }
+
 
     fun cancelTransfer(id: Long) {
         val record = recordsMap[id] ?: return

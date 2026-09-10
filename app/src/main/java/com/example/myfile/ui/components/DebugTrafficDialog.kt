@@ -1,6 +1,7 @@
 package com.example.myfile.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,7 +17,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,8 +42,14 @@ fun DebugTrafficDialog(
     val recentTransfers by TrafficMonitor.recentTransfers.collectAsState()
     val debugLogs by TrafficMonitor.debugLogs.collectAsState()
     val totalSpeed by TrafficMonitor.totalDownloadSpeed.collectAsState()
+    val speedHistory by TrafficMonitor.speedHistory.collectAsState()
 
     var selectedTab by remember { mutableStateOf(0) }
+
+    // 时间窗口切换：30s / 1min / 2min / 5min 循环
+    val timeWindows = listOf(30_000L, 60_000L, 120_000L, 300_000L)
+    val timeWindowLabels = listOf("30秒", "1分钟", "2分钟", "5分钟")
+    var timeWindowIndex by remember { mutableStateOf(timeWindows.size - 1) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -78,7 +90,7 @@ fun DebugTrafficDialog(
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
-                                "实时网络传输监视器 v1.1.7",
+                                "实时网络传输监视器 v1.1.9",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -95,7 +107,7 @@ fun DebugTrafficDialog(
                     }
                 }
 
-                // 2. 状态仪表盘面板
+                // 2. 速度面板：当前速度 + 5 分钟曲线图
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -103,42 +115,68 @@ fun DebugTrafficDialog(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        Column {
-                            Text("实时下行速度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = formatSpeed(totalSpeed),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = if (totalSpeed > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column {
+                                Text("实时下行速度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = formatSpeed(totalSpeed),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (totalSpeed > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            // 时间窗口切换按钮：点击循环切换
+                            Surface(
+                                onClick = { timeWindowIndex = (timeWindowIndex + 1) % timeWindows.size },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = timeWindowLabels[timeWindowIndex],
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.width(2.dp))
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "切换时间范围",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("活跃连接", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = "${activeTransfers.size}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (activeTransfers.isNotEmpty()) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("近期请求数", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = "${recentTransfers.size}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Spacer(Modifier.height(6.dp))
+                        SpeedCurveChart(
+                            speedHistory = speedHistory,
+                            lineColor = MaterialTheme.colorScheme.primary,
+                            windowMs = timeWindows[timeWindowIndex],
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(72.dp)
+                        )
                     }
                 }
+
+
 
                 // 3. Tab 切换
                 TabRow(
@@ -578,5 +616,141 @@ private fun DebugLogsList(
             }
         }
     }
+}
+
+/** 滚动速度曲线图（带纵坐标 Y 轴刻度指示大小），支持时间窗口 + 平滑处理 */
+@Composable
+fun SpeedCurveChart(
+    speedHistory: List<Pair<Long, Long>>,
+    lineColor: Color,
+    modifier: Modifier = Modifier,
+    windowMs: Long = 300_000L
+) {
+    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+
+    // 只取窗口内的数据点
+    val now = System.currentTimeMillis()
+    val cutoff = now - windowMs
+    val inWindow = speedHistory.filter { it.first >= cutoff }
+
+    // 平滑处理：对窗口内速度做移动平均（滑动窗口），消除瞬时毛刺
+    val smoothed = smoothSpeed(inWindow, windowSize = 5)
+
+    val maxSpeed = smoothed.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
+    val midSpeed = maxSpeed / 2
+
+    Row(modifier = modifier) {
+        // 左侧/右侧纵坐标刻度文字 (3个刻度: 顶端最大值、中间值、0)
+        Column(
+            modifier = Modifier
+                .width(52.dp)
+                .fillMaxHeight()
+                .padding(end = 4.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End
+        ) {
+            Text(
+                text = formatSpeed(maxSpeed),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Text(
+                text = formatSpeed(midSpeed),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1
+            )
+            Text(
+                text = "0 B/s",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                maxLines = 1
+            )
+        }
+
+        // 曲线绘制画布
+        Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            val w = size.width
+            val h = size.height
+
+            // 背景参考线（顶、中、底 3 条横线）
+            val gridLines = 2
+            for (i in 0..gridLines) {
+                val y = h * i / gridLines
+                drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+            }
+
+            if (smoothed.size < 2) {
+                // 无数据：底部灰色平线
+                drawLine(
+                    color = lineColor.copy(alpha = 0.3f),
+                    start = Offset(0f, h),
+                    end = Offset(w, h),
+                    strokeWidth = 2f
+                )
+                return@Canvas
+            }
+
+            val tMin = now - windowMs
+
+            val path = Path()
+            var firstPoint = true
+
+            smoothed.forEach { (ts, speed) ->
+                val x = ((ts - tMin).toFloat() / windowMs * w).coerceIn(0f, w)
+                val y = (h - speed.toFloat() / maxSpeed * h).coerceIn(0f, h)
+                if (firstPoint) {
+                    path.moveTo(x, y)
+                    firstPoint = false
+                } else {
+                    path.lineTo(x, y)
+                }
+            }
+
+            drawPath(
+                path = path,
+                color = lineColor,
+                style = Stroke(
+                    width = 2.5f,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+            )
+
+            // 顶端速度标注点
+            val peakEntry = smoothed.maxByOrNull { it.second }
+            if (peakEntry != null && peakEntry.second > 0L) {
+                val px = ((peakEntry.first - tMin).toFloat() / windowMs * w).coerceIn(0f, w)
+                val py = (h - peakEntry.second.toFloat() / maxSpeed * h).coerceIn(0f, h)
+                drawCircle(lineColor, radius = 4f, center = Offset(px, py))
+            }
+        }
+    }
+}
+
+/**
+ * 对速度序列做滑动窗口移动平均，消除瞬时毛刺，让曲线更平滑。
+ * @param windowSize 移动平均窗口大小（采样点数，奇数最佳），越大越平滑。
+ */
+private fun smoothSpeed(
+    data: List<Pair<Long, Long>>,
+    windowSize: Int = 5
+): List<Pair<Long, Long>> {
+    if (data.size < 3 || windowSize <= 1) return data
+    val half = windowSize / 2
+    val result = ArrayList<Pair<Long, Long>>(data.size)
+    for (i in data.indices) {
+        val start = (i - half).coerceAtLeast(0)
+        val end = (i + half).coerceAtMost(data.size - 1)
+        var sum = 0L
+        for (j in start..end) {
+            sum += data[j].second
+        }
+        val avg = sum / (end - start + 1)
+        // 保留原始时间戳，仅平滑速度值
+        result.add(data[i].first to avg)
+    }
+    return result
 }
 

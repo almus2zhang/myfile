@@ -66,7 +66,7 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 @Composable
-fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
+fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Unit = {}) {
     val state by vm.state.collectAsState()
     val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -79,6 +79,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     var downloadingApkFileName by remember { mutableStateOf("") }
     var pendingUnlockAccount by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     var pendingUnlockForEdit by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
+    // 三点菜单及 Dialog
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showTransferDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -299,6 +303,30 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             expanded = showAccountMenu,
                             onDismissRequest = { showAccountMenu = false }
                         ) {
+                            // 顶部：本地存储入口
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "📱 本地存储",
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.PhoneAndroid,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showAccountMenu = false
+                                    onNavigateToLocal()
+                                }
+                            )
+                            HorizontalDivider()
+
                             state.accounts.forEach { acc ->
                                 val isSelected = acc.id == state.currentAccount?.id
                                 DropdownMenuItem(
@@ -523,35 +551,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     Spacer(Modifier.weight(1f))
 
                     // 速度显示在四个图标前面
-                    if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
-                        Surface(
-                            onClick = { showTrafficDebug = true },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 7.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.Speed,
-                                    contentDescription = "网速",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(Modifier.width(3.dp))
-                                Text(
-                                    text = com.example.myfile.ui.components.formatSpeed(totalSpeed),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(2.dp))
-                    }
 
-                    // 右侧四个操作按钮（稍微放大至 40dp，图标 24dp）
+                    // 右侧按钮行（视图切换、排序、三点菜单）
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -701,30 +702,64 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                             }
                         }
 
-                        // 3. 网络传输监控
-                        IconButton(
-                            onClick = { showTrafficDebug = true },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            BadgedBox(
-                                badge = {
-                                    if (activeTransfers.isNotEmpty()) {
-                                        Badge { Text("${activeTransfers.size}") }
-                                    }
-                                }
+                        // 3. 三点菜单（含角标）
+                        Box {
+                            IconButton(
+                                onClick = { showMoreMenu = true },
+                                modifier = Modifier.size(40.dp)
                             ) {
-                                Icon(Icons.Filled.Speed, "网络传输监控", modifier = Modifier.size(24.dp))
+                                BadgedBox(
+                                    badge = {
+                                        if (activeTransfers.isNotEmpty()) {
+                                            Badge { Text("${activeTransfers.size}") }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Filled.MoreVert, "更多", modifier = Modifier.size(24.dp))
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("网络传输监控器") },
+                                    leadingIcon = {
+                                        BadgedBox(
+                                            badge = {
+                                                if (activeTransfers.isNotEmpty()) {
+                                                    Badge { Text("${activeTransfers.size}") }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Filled.Speed, null, modifier = Modifier.size(20.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showTrafficDebug = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("传输") },
+                                    leadingIcon = { Icon(Icons.Filled.SwapVert, null, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showTransferDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("设置") },
+                                    leadingIcon = { Icon(Icons.Filled.Settings, null, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showSettingsDialog = true
+                                    }
+                                )
                             }
                         }
-
-                        // 4. 刷新按钮
-                        IconButton(
-                            onClick = { vm.refresh() },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(Icons.Filled.Refresh, "刷新", modifier = Modifier.size(24.dp))
-                        }
                     }
+
                 }
             }
         },
@@ -916,43 +951,79 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        crumbs.forEachIndexed { index, crumb ->
-                            if (index > 0) {
-                                Text(
-                                    text = "›",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.padding(horizontal = 2.dp)
-                                )
-                            }
-                            val isCurrent = index == crumbs.lastIndex
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        if (!isCurrent) {
-                                            vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
-                                            vm.navigateTo(crumb.path)
+                        // 面包屑路径（可横向滚动，占剩余空间）
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            crumbs.forEachIndexed { index, crumb ->
+                                if (index > 0) {
+                                    Text(
+                                        text = "›",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.padding(horizontal = 2.dp)
+                                    )
+                                }
+                                val isCurrent = index == crumbs.lastIndex
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            if (!isCurrent) {
+                                                vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                                vm.navigateTo(crumb.path)
+                                            }
                                         }
-                                    }
+                                ) {
+                                    Text(
+                                        text = crumb.name,
+                                        color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // 实时速度徽章（固定在右侧，不随面包屑滚动）
+                        if (totalSpeed > 0L || activeTransfers.isNotEmpty()) {
+                            Surface(
+                                onClick = { showTrafficDebug = true },
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier
+                                    .padding(end = 8.dp, top = 3.dp, bottom = 3.dp)
+                                    .height(22.dp)
                             ) {
-                                Text(
-                                    text = crumb.name,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Speed,
+                                        contentDescription = "网速",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(
+                                        text = com.example.myfile.ui.components.formatSpeed(totalSpeed),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
                             }
                         }
                     }
@@ -1707,6 +1778,18 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel()) {
     if (showTrafficDebug) {
         com.example.myfile.ui.components.DebugTrafficDialog(
             onDismiss = { showTrafficDebug = false }
+        )
+    }
+
+    if (showTransferDialog) {
+        com.example.myfile.ui.transfer.TransferScreenDialog(
+            onDismiss = { showTransferDialog = false }
+        )
+    }
+
+    if (showSettingsDialog) {
+        com.example.myfile.ui.settings.SettingsScreenDialog(
+            onDismiss = { showSettingsDialog = false }
         )
     }
 

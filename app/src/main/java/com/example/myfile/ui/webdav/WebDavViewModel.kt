@@ -121,13 +121,17 @@ class WebDavViewModel : ViewModel() {
         // 恢复目标账户上次打开的路径
         val targetPath = pathStore.getLastPath(account.id)
         val (mode, asc) = getFolderSort(account.id, targetPath)
+        // 先清空文件列表、停止loading（避免转圈残留），再触发新的刷新
         _state.value = _state.value.copy(
             currentAccount = account,
             currentPath = targetPath,
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
-            multiSelectMode = false
+            multiSelectMode = false,
+            files = emptyList(),
+            loading = false,
+            error = null
         )
         refresh()
     }
@@ -366,7 +370,13 @@ class WebDavViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("WebDavVM", "refresh failed", e)
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-                _state.value = _state.value.copy(loading = false, error = "连接失败: $msg")
+                // 区分直连失败和跳转地址不可达
+                val errorMsg = if (acc.isDynamic && acc.resolvedUrl.isNotBlank()) {
+                    "输入地址可达，但跳转地址 ${acc.resolvedUrl} 无法连接: $msg"
+                } else {
+                    "无法连接 ${acc.url}，请检查网络或配置: $msg"
+                }
+                _state.value = _state.value.copy(loading = false, error = errorMsg)
             }
         }
     }
@@ -486,9 +496,31 @@ class WebDavViewModel : ViewModel() {
 
     fun rename(entry: FileEntry, newName: String) {
         val acc = _state.value.currentAccount ?: return
+        val trimmed = newName.trim()
+        // 安全校验：拒绝空名、含路径分隔符的名字（防止把文件移动到别的路径/父目录）
+        if (trimmed.isEmpty() || trimmed == "." || trimmed == "..") {
+            _state.value = _state.value.copy(error = "名称不合法")
+            return
+        }
+        if (trimmed.contains('/') || trimmed.contains('\\')) {
+            _state.value = _state.value.copy(error = "文件名不能包含 / 或 \\")
+            return
+        }
         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
         val dir = p.substringBeforeLast('/', "")
-        val targetPath = if (dir.isEmpty()) "/$newName" else "$dir/$newName"
+        val targetPath = if (dir.isEmpty()) "/$trimmed" else "$dir/$trimmed"
+        if (targetPath == p) {
+            _state.value = _state.value.copy(error = "名称未改变")
+            return
+        }
+        // 重名校验：同目录下已存在同名条目则拒绝，避免 Overwrite 覆盖已有文件
+        val conflict = _state.value.files.any {
+            it.path != p && it.path.equals(targetPath, ignoreCase = true)
+        }
+        if (conflict) {
+            _state.value = _state.value.copy(error = "已存在同名文件或文件夹")
+            return
+        }
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true)
             try {

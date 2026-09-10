@@ -96,6 +96,10 @@ object AppResolver {
             val explicit = Intent(intent).apply {
                 component = candidate.component
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // 关键：让目标应用在独立任务中打开，而不是复用/嵌入 myfile 的任务，
+                // 这样最近任务列表里 myfile 和目标应用各自独立。
+                addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(explicit)
@@ -111,6 +115,7 @@ object AppResolver {
         try {
             val chooser = Intent.createChooser(intent, title).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(chooser)
