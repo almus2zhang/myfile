@@ -165,6 +165,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val scope = rememberCoroutineScope()
 
     val showThumbnailsAndDuration by vm.showThumbnailsAndDuration.collectAsState()
+    val showHiddenFiles by vm.showHiddenFilesFlow.collectAsState()
     val durationRefreshTrigger by vm.durationRefreshTrigger.collectAsState()
     var lastProcessedTrigger by remember { mutableStateOf(0) }
 
@@ -627,6 +628,33 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     },
                                     onClick = {
                                         vm.toggleShowThumbnailsAndDuration()
+                                    }
+                                )
+
+                                // 是否显示隐藏文件开关
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "显示隐藏文件",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Visibility,
+                                            contentDescription = null,
+                                            tint = if (showHiddenFiles) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Checkbox(
+                                            checked = showHiddenFiles,
+                                            onCheckedChange = null
+                                        )
+                                    },
+                                    onClick = {
+                                        vm.toggleShowHiddenFiles()
                                     }
                                 )
 

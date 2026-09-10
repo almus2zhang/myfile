@@ -19,12 +19,15 @@ data class LocalUiState(
     val selected: Set<String> = emptySet(),
     val multiSelectMode: Boolean = false,
     val message: String? = null,
-    val isRefreshing: Boolean = false
+    val isRefreshing: Boolean = false,
+    val showHiddenFiles: Boolean = false
 ) {
     val sortedFiles: List<FileEntry>
         get() {
-            val dirs = files.filter { it.isDirectory }
-            val fs = files.filter { !it.isDirectory }
+            // 不显示隐藏文件时过滤掉以 . 开头的条目
+            val visible = if (showHiddenFiles) files else files.filter { !it.name.startsWith(".") }
+            val dirs = visible.filter { it.isDirectory }
+            val fs = visible.filter { !it.isDirectory }
             val cmp: Comparator<FileEntry> = when (sortMode) {
                 com.example.myfile.ui.webdav.SortMode.NAME -> compareBy { it.name.lowercase() }
                 com.example.myfile.ui.webdav.SortMode.SIZE -> compareBy { it.size }
@@ -62,6 +65,17 @@ class LocalViewModel : ViewModel() {
         viewModeStore.setShowThumbnailsAndDuration(!current)
     }
 
+    val showHiddenFilesFlow: StateFlow<Boolean> = viewModeStore.showHiddenFiles
+
+    fun setShowHiddenFiles(show: Boolean) {
+        viewModeStore.setShowHiddenFiles(show)
+        _state.value = _state.value.copy(showHiddenFiles = show)
+    }
+
+    fun toggleShowHiddenFiles() {
+        setShowHiddenFiles(!viewModeStore.showHiddenFiles.value)
+    }
+
     private val _durationRefreshTrigger = MutableStateFlow(0)
     val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
 
@@ -80,6 +94,16 @@ class LocalViewModel : ViewModel() {
     init {
         val (mode, asc) = getFolderSort(rootDir.absolutePath)
         _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+        // 初始同步「显示隐藏文件」设置
+        _state.value = _state.value.copy(showHiddenFiles = viewModeStore.showHiddenFiles.value)
+        // 监听设置变化，实时同步到 sortedFiles 过滤
+        viewModelScope.launch {
+            viewModeStore.showHiddenFiles.collect { show ->
+                if (_state.value.showHiddenFiles != show) {
+                    _state.value = _state.value.copy(showHiddenFiles = show)
+                }
+            }
+        }
         refresh()
     }
 

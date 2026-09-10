@@ -19,6 +19,23 @@ class ViewModeStore(context: Context) {
     private val _showThumbnailsAndDuration = MutableStateFlow(loadShowThumbnailsAndDuration())
     val showThumbnailsAndDuration: StateFlow<Boolean> = _showThumbnailsAndDuration.asStateFlow()
 
+    /** 是否显示隐藏文件（以 . 开头的文件/文件夹），默认不显示 */
+    private val _showHiddenFiles = MutableStateFlow(loadShowHiddenFiles())
+    val showHiddenFiles: StateFlow<Boolean> = _showHiddenFiles.asStateFlow()
+
+    private fun loadShowHiddenFiles(): Boolean {
+        return prefs.getBoolean("show_hidden_files", false)
+    }
+
+    fun setShowHiddenFiles(show: Boolean) {
+        prefs.edit().putBoolean("show_hidden_files", show).apply()
+        _showHiddenFiles.value = show
+    }
+
+    fun toggleShowHiddenFiles() {
+        setShowHiddenFiles(!_showHiddenFiles.value)
+    }
+
     private fun loadWebDavMode(): ViewMode {
         val name = prefs.getString("webdav_view_mode", ViewMode.DETAILS.name)
         return try {

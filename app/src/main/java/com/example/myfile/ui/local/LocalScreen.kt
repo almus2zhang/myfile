@@ -65,6 +65,7 @@ fun LocalScreen(
 
     val viewMode by vm.viewMode.collectAsState()
     val showThumbnailsAndDuration by vm.showThumbnailsAndDuration.collectAsState()
+    val showHiddenFiles by vm.showHiddenFilesFlow.collectAsState()
     val durationRefreshTrigger by vm.durationRefreshTrigger.collectAsState()
     var lastProcessedTrigger by remember { mutableStateOf(0) }
 
@@ -487,6 +488,12 @@ fun LocalScreen(
                                     leadingIcon = { Icon(imageVector = Icons.Filled.Image, contentDescription = null, tint = if (showThumbnailsAndDuration) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp)) },
                                     trailingIcon = { Checkbox(checked = showThumbnailsAndDuration, onCheckedChange = null) },
                                     onClick = { vm.toggleShowThumbnailsAndDuration() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(text = "显示隐藏文件", style = MaterialTheme.typography.bodyMedium) },
+                                    leadingIcon = { Icon(imageVector = Icons.Filled.Visibility, contentDescription = null, tint = if (showHiddenFiles) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp)) },
+                                    trailingIcon = { Checkbox(checked = showHiddenFiles, onCheckedChange = null) },
+                                    onClick = { vm.toggleShowHiddenFiles() }
                                 )
                                 DropdownMenuItem(
                                     text = { Text(text = "强制重新获取时长", style = MaterialTheme.typography.bodyMedium) },

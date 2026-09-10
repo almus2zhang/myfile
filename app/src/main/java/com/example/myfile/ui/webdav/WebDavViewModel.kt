@@ -26,13 +26,16 @@ data class WebDavUiState(
     val sortAsc: Boolean = true,
     val selected: Set<String> = emptySet(),
     val multiSelectMode: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    val showHiddenFiles: Boolean = false
 ) {
-    /** 排序后的文件列表：目录始终在前，然后按选定字段排序 */
+    /** 排序后的文件列表：目录始终在前，然后按选定字段排序（隐藏文件可选过滤） */
     val sortedFiles: List<FileEntry>
         get() {
-            val dirs = files.filter { it.isDirectory }
-            val fs = files.filter { !it.isDirectory }
+            // 不显示隐藏文件时过滤掉以 . 开头的条目
+            val visible = if (showHiddenFiles) files else files.filter { !it.name.startsWith(".") }
+            val dirs = visible.filter { it.isDirectory }
+            val fs = visible.filter { !it.isDirectory }
             val cmp: Comparator<FileEntry> = when (sortMode) {
                 SortMode.NAME -> compareBy { it.name.lowercase() }
                 SortMode.SIZE -> compareBy { it.size }
@@ -78,6 +81,17 @@ class WebDavViewModel : ViewModel() {
         viewModeStore.setShowThumbnailsAndDuration(!current)
     }
 
+    val showHiddenFilesFlow: StateFlow<Boolean> = viewModeStore.showHiddenFiles
+
+    fun setShowHiddenFiles(show: Boolean) {
+        viewModeStore.setShowHiddenFiles(show)
+        _state.value = _state.value.copy(showHiddenFiles = show)
+    }
+
+    fun toggleShowHiddenFiles() {
+        setShowHiddenFiles(!viewModeStore.showHiddenFiles.value)
+    }
+
     private val _durationRefreshTrigger = MutableStateFlow(0)
     val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
 
@@ -94,6 +108,15 @@ class WebDavViewModel : ViewModel() {
     }
 
     init {
+        // 同步「显示隐藏文件」设置
+        _state.value = _state.value.copy(showHiddenFiles = viewModeStore.showHiddenFiles.value)
+        viewModelScope.launch {
+            viewModeStore.showHiddenFiles.collect { show ->
+                if (_state.value.showHiddenFiles != show) {
+                    _state.value = _state.value.copy(showHiddenFiles = show)
+                }
+            }
+        }
         viewModelScope.launch {
             var initialized = false
             accountStore.accounts.collect { list ->
