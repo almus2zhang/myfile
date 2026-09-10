@@ -13,7 +13,8 @@ import com.example.myfile.ui.webdav.WebDavViewModel
 fun AppNavigation() {
     val vm: WebDavViewModel = viewModel()
     val state by vm.state.collectAsState()
-    var showLocal by remember { mutableStateOf(false) }
+    // 默认进入本地存储；可通过顶部下拉切换到任意 WebDAV 账户
+    var showLocal by remember { mutableStateOf(true) }
 
     if (showLocal) {
         com.example.myfile.ui.local.LocalScreen(
