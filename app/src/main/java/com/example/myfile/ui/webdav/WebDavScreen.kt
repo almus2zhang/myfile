@@ -1407,6 +1407,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                     )
                                                 }
                                                 DropdownMenuItem(
+                                                    text = { Text("复制") },
+                                                    leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        vm.copyOne(entry)
+                                                    }
+                                                )
+                                                DropdownMenuItem(
                                                     text = { Text("重命名") },
                                                     leadingIcon = { Icon(Icons.Filled.Edit, null) },
                                                     onClick = {

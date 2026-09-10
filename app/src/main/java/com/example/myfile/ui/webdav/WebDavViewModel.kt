@@ -283,6 +283,17 @@ class WebDavViewModel : ViewModel() {
         )
     }
 
+    /** 复制单个文件/文件夹到剪贴板（用于「更多」菜单的复制操作） */
+    fun copyOne(entry: FileEntry) {
+        val acc = _state.value.currentAccount ?: return
+        com.example.myfile.core.TransferClipboard.copy(
+            listOf(com.example.myfile.core.ClipboardEntry(entry = entry, account = acc))
+        )
+        _state.value = _state.value.copy(
+            message = "已复制 \"${entry.name}\"，可到目标目录粘贴"
+        )
+    }
+
     fun cutSelected() {
         val acc = _state.value.currentAccount ?: return
         val curFiles = _state.value.files.associateBy { it.path }
