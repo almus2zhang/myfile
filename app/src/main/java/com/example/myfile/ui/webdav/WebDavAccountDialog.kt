@@ -10,13 +10,19 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -39,6 +45,7 @@ fun WebDavAccountDialog(
     var isEncrypted by remember { mutableStateOf(initial?.isEncrypted ?: false) }
     var encryptPassword by remember { mutableStateOf(initial?.encryptPassword ?: "") }
     var encryptPasswordVisible by remember { mutableStateOf(false) }
+    var rememberLastPath by remember { mutableStateOf(initial?.rememberLastPath ?: true) }
     var isDynamic by remember { mutableStateOf(initial?.isDynamic ?: false) }
     var resolvedUrl by remember { mutableStateOf(initial?.resolvedUrl ?: "") }
     var extraPorts by remember { mutableStateOf(initial?.extraUrls?.joinToString(",") { extractPort(it) } ?: "") }
@@ -55,16 +62,29 @@ fun WebDavAccountDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                SettingsSectionTitle(
+                    icon = Icons.Filled.Cloud,
+                    title = "基本信息"
+                )
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.replace("\r", "").replace("\n", "") },
                     label = { Text("名称") },
                     singleLine = true,
-                    maxLines = 1
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 )
 
                 // 类别选择：普通固定地址 vs 动态解析/重定向
-                Text("账户类别", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    "账户类别",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 2.dp, top = 4.dp)
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = !isDynamic,
@@ -120,6 +140,8 @@ fun WebDavAccountDialog(
                     },
                     singleLine = true,
                     maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     supportingText = {
                         if (!isDynamic) {
                             Text("群晖需带共享文件夹名，例如 http://域名:5005/video", style = MaterialTheme.typography.bodySmall)
@@ -131,7 +153,9 @@ fun WebDavAccountDialog(
                     onValueChange = { user = it.replace("\r", "").replace("\n", "") },
                     label = { Text("用户名") },
                     singleLine = true,
-                    maxLines = 1
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 )
                 OutlinedTextField(
                     value = pass,
@@ -139,6 +163,8 @@ fun WebDavAccountDialog(
                     label = { Text("密码") },
                     singleLine = true,
                     maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
@@ -155,89 +181,87 @@ fun WebDavAccountDialog(
                     label = { Text("备用端口（逗号分隔，如 24438,24439）") },
                     singleLine = true,
                     maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     supportingText = {
                         Text("多个打洞端口轮换下载，绕过运营商流量额度限速", style = MaterialTheme.typography.bodySmall)
                     }
                 )
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                // 加速下载（改名下载）开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("改名下载（加速下载）", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "点击 APK 或大于 5M 文件时采用改名多线程加速下载，绕过运营商限速",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = renameToVideoExt,
-                        onCheckedChange = { renameToVideoExt = it }
+                // ============ 高级选项分组 ============
+                SettingsSectionTitle(
+                    icon = Icons.Filled.Tune,
+                    title = "高级选项"
+                )
+                SettingsCard {
+                    // 记住上次路径
+                    OptionSwitch(
+                        title = "记住上次浏览位置",
+                        subtitle = "下次切换到此配置时，自动回到上次浏览的目录",
+                        checked = rememberLastPath,
+                        onCheckedChange = { rememberLastPath = it }
                     )
                 }
 
-                // 视频播放伪装 .avi 加速开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("视频播放伪装 .avi 加速", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "在线播放视频时临时改名为 .avi，加速流媒体加载与播放",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
+                // ============ 加速选项分组 ============
+                SettingsSectionTitle(
+                    icon = Icons.Filled.Bolt,
+                    title = "加速选项"
+                )
+                SettingsCard {
+                    OptionSwitch(
+                        title = "改名下载（加速下载）",
+                        subtitle = "点击 APK 或大于 5M 文件时采用改名多线程加速下载，绕过运营商限速",
+                        checked = renameToVideoExt,
+                        onCheckedChange = { renameToVideoExt = it }
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    OptionSwitch(
+                        title = "视频播放伪装 .avi 加速",
+                        subtitle = "在线播放视频时临时改名为 .avi，加速流媒体加载与播放",
                         checked = streamFakeAvi,
                         onCheckedChange = { streamFakeAvi = it }
                     )
                 }
 
-                // 配置加密保护开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("配置加密保护", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "切换到该配置时需要输入密码或指纹解锁",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
+                // ============ 安全分组 ============
+                SettingsSectionTitle(
+                    icon = Icons.Filled.Shield,
+                    title = "安全"
+                )
+                SettingsCard {
+                    OptionSwitch(
+                        title = "配置加密保护",
+                        subtitle = "切换到该配置时需要输入密码或指纹解锁",
                         checked = isEncrypted,
                         onCheckedChange = { isEncrypted = it }
                     )
-                }
-
-                if (isEncrypted) {
-                    OutlinedTextField(
-                        value = encryptPassword,
-                        onValueChange = { encryptPassword = it.replace("\r", "").replace("\n", "") },
-                        label = { Text("独立解锁密码") },
-                        placeholder = { Text("留空则默认使用上方 WebDAV 密码") },
-                        supportingText = { Text("切换到该配置时验证此密码或指纹（留空使用 WebDAV 密码）", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        maxLines = 1,
-                        visualTransformation = if (encryptPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { encryptPasswordVisible = !encryptPasswordVisible }) {
-                                Icon(
-                                    imageVector = if (encryptPasswordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                                    contentDescription = if (encryptPasswordVisible) "隐藏密码" else "显示密码"
-                                )
+                    if (isEncrypted) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = encryptPassword,
+                            onValueChange = { encryptPassword = it.replace("\r", "").replace("\n", "") },
+                            label = { Text("独立解锁密码") },
+                            placeholder = { Text("留空则默认使用上方 WebDAV 密码") },
+                            supportingText = { Text("切换到该配置时验证此密码或指纹（留空使用 WebDAV 密码）", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            maxLines = 1,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            visualTransformation = if (encryptPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { encryptPasswordVisible = !encryptPasswordVisible }) {
+                                    Icon(
+                                        imageVector = if (encryptPasswordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                        contentDescription = if (encryptPasswordVisible) "隐藏密码" else "显示密码"
+                                    )
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -274,7 +298,8 @@ fun WebDavAccountDialog(
                                 renameToVideoExt = renameToVideoExt,
                                 streamFakeAvi = streamFakeAvi,
                                 isEncrypted = isEncrypted,
-                                encryptPassword = encryptPassword
+                                encryptPassword = encryptPassword,
+                                rememberLastPath = rememberLastPath
                             )
                             kotlinx.coroutines.GlobalScope.launch {
                                 val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
@@ -332,7 +357,8 @@ fun WebDavAccountDialog(
                             renameToVideoExt = renameToVideoExt,
                             streamFakeAvi = streamFakeAvi,
                             isEncrypted = isEncrypted,
-                            encryptPassword = encryptPassword
+                            encryptPassword = encryptPassword,
+                            rememberLastPath = rememberLastPath
                         )
                     )
                 }
@@ -340,6 +366,84 @@ fun WebDavAccountDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
+}
+
+/** 分组标题（带图标） */
+@Composable
+private fun SettingsSectionTitle(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 14.dp, bottom = 6.dp, start = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+/** 分组卡片容器 */
+@Composable
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            content = content
+        )
+    }
+}
+
+/** 统一的开关选项行 */
+@Composable
+private fun OptionSwitch(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = MaterialTheme.typography.bodySmall.lineHeight
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
 }
 
 /** 清洗并规范化 WebDAV URL，纠正全角字符、不可见字符、空格、重复协议等常见输入错误 */

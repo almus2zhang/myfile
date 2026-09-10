@@ -71,6 +71,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.biometric)
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
     debugImplementation(libs.androidx.ui.tooling)

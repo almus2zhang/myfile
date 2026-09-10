@@ -1,9 +1,8 @@
 package com.example.myfile.ui.components
 
-import android.content.Context
-import android.os.Build
-import android.os.CancellationSignal
 import android.widget.Toast
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
@@ -19,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import com.example.myfile.model.WebDavAccount
 
 @Composable
@@ -31,43 +32,82 @@ fun AccountUnlockDialog(
     var enteredPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var biometricHint by remember { mutableStateOf<String?>(null) }
 
-    fun triggerBiometricPrompt() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                val cancellationSignal = CancellationSignal()
-                val prompt = android.hardware.biometrics.BiometricPrompt.Builder(context)
-                    .setTitle("解锁配置")
-                    .setSubtitle("验证指纹以访问「${account.name}」")
-                    .setNegativeButton("使用密码", context.mainExecutor) { _, _ ->
-                        cancellationSignal.cancel()
-                    }
-                    .build()
+    // androidx.biometric 需要 FragmentActivity 才能显示系统生物识别弹窗
+    val activity = context as? FragmentActivity
 
-                prompt.authenticate(
-                    cancellationSignal,
-                    context.mainExecutor,
-                    object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
-                        override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) {
-                            super.onAuthenticationSucceeded(result)
-                            onUnlockSuccess()
-                        }
+    /** 检查设备是否具备可用的生物识别能力 */
+    fun biometricStatus(): Int {
+        val manager = BiometricManager.from(context)
+        return manager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        )
+    }
 
-                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
-                            super.onAuthenticationError(errorCode, errString)
-                            // 取消或错误
-                        }
-                    }
-                )
-            } catch (_: Exception) {
+    fun triggerBiometric() {
+        val act = activity ?: run {
+            biometricHint = "无法启动生物识别（需要 Activity 上下文）"
+            return
+        }
+        when (biometricStatus()) {
+            BiometricManager.BIOMETRIC_SUCCESS -> {
+                // 设备支持，正常拉起
             }
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
+                biometricHint = "此设备不支持指纹/生物识别"
+                return
+            }
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
+                biometricHint = "生物识别硬件暂不可用"
+                return
+            }
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+                biometricHint = "请先在系统设置中录入指纹或锁屏密码"
+                return
+            }
+            else -> {
+                biometricHint = "生物识别不可用"
+                return
+            }
+        }
+
+        val executor = ContextCompat.getMainExecutor(act)
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                super.onAuthenticationSucceeded(result)
+                onUnlockSuccess()
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                super.onAuthenticationError(errorCode, errString)
+                biometricHint = errString.toString()
+            }
+
+            override fun onAuthenticationFailed() {
+                super.onAuthenticationFailed()
+                biometricHint = "验证失败，请重试"
+            }
+        }
+
+        val prompt = BiometricPrompt(act, executor, callback)
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("解锁配置")
+            .setSubtitle("验证指纹以访问「${account.name}」")
+            .setNegativeButtonText("使用密码")
+            .build()
+
+        try {
+            prompt.authenticate(info)
+        } catch (e: Exception) {
+            biometricHint = "启动指纹验证失败: ${e.message}"
         }
     }
 
-    // 进入对话框时尝试自动拉起一次指纹识别（若系统支持）
+    // 进入对话框时自动拉起一次指纹识别（若设备支持且已录入）
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            triggerBiometricPrompt()
+        if (activity != null && biometricStatus() == BiometricManager.BIOMETRIC_SUCCESS) {
+            triggerBiometric()
         }
     }
 
@@ -118,9 +158,18 @@ fun AccountUnlockDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                // 生物识别状态提示
+                biometricHint?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                if (biometricStatus() != BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE) {
                     OutlinedButton(
-                        onClick = { triggerBiometricPrompt() },
+                        onClick = { triggerBiometric() },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Filled.Fingerprint, null, modifier = Modifier.size(18.dp))

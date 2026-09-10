@@ -55,7 +55,9 @@ fun LocalScreen(
     vm: LocalViewModel = viewModel(),
     onBack: (() -> Unit)? = null,
     accounts: List<com.example.myfile.model.WebDavAccount> = emptyList(),
-    onSwitchToWebDav: ((com.example.myfile.model.WebDavAccount) -> Unit)? = null
+    onSwitchToWebDav: ((com.example.myfile.model.WebDavAccount) -> Unit)? = null,
+    onEditWebDav: ((com.example.myfile.model.WebDavAccount) -> Unit)? = null,
+    onDeleteWebDav: ((com.example.myfile.model.WebDavAccount) -> Unit)? = null
 ) {
     val state by vm.state.collectAsState()
     val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
@@ -325,6 +327,43 @@ fun LocalScreen(
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp)
                                         )
+                                    },
+                                    trailingIcon = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            // 编辑配置
+                                            IconButton(
+                                                onClick = {
+                                                    showSourceMenu = false
+                                                    onEditWebDav?.invoke(acc)
+                                                },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Edit,
+                                                    contentDescription = "编辑配置",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                            // 删除配置
+                                            IconButton(
+                                                onClick = {
+                                                    showSourceMenu = false
+                                                    onDeleteWebDav?.invoke(acc)
+                                                },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Delete,
+                                                    contentDescription = "删除配置",
+                                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
                                     },
                                     onClick = {
                                         showSourceMenu = false

@@ -39,7 +39,8 @@ class AccountStore(private val context: Context) {
                         renameToVideoExt = o.optBoolean("renameToVideoExt", true),
                         streamFakeAvi = o.optBoolean("streamFakeAvi", false),
                         isEncrypted = o.optBoolean("isEncrypted", false),
-                        encryptPassword = o.optString("encryptPassword", "")
+                        encryptPassword = o.optString("encryptPassword", ""),
+                        rememberLastPath = o.optBoolean("rememberLastPath", true)
                     )
                 }
             } catch (e: Exception) { emptyList() }
@@ -65,6 +66,7 @@ class AccountStore(private val context: Context) {
                     put("streamFakeAvi", a.streamFakeAvi)
                     put("isEncrypted", a.isEncrypted)
                     put("encryptPassword", a.encryptPassword)
+                    put("rememberLastPath", a.rememberLastPath)
                 })
             }
             p[key] = arr.toString()

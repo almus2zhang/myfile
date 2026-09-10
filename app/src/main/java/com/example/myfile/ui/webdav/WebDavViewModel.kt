@@ -122,7 +122,7 @@ class WebDavViewModel : ViewModel() {
             accountStore.accounts.collect { list ->
                 val cur = _state.value.currentAccount ?: list.firstOrNull()
                 val prev = _state.value
-                val initialPath = if (cur != null) pathStore.getLastPath(cur.id) else "/"
+                val initialPath = if (cur != null && cur.rememberLastPath) pathStore.getLastPath(cur.id) else "/"
                 val (mode, asc) = if (cur != null) getFolderSort(cur.id, initialPath) else (SortMode.NAME to true)
                 _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = initialPath, sortMode = mode, sortAsc = asc)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
@@ -137,12 +137,14 @@ class WebDavViewModel : ViewModel() {
     }
 
     fun selectAccount(account: WebDavAccount) {
-        // 保存当前账户路径
+        // 保存当前账户路径（仅当该账户开启了「记住上次路径」）
         _state.value.currentAccount?.let {
-            pathStore.saveLastPath(it.id, _state.value.currentPath)
+            if (it.rememberLastPath) {
+                pathStore.saveLastPath(it.id, _state.value.currentPath)
+            }
         }
-        // 恢复目标账户上次打开的路径
-        val targetPath = pathStore.getLastPath(account.id)
+        // 恢复目标账户上次打开的路径（未开启则回到根目录）
+        val targetPath = if (account.rememberLastPath) pathStore.getLastPath(account.id) else "/"
         val (mode, asc) = getFolderSort(account.id, targetPath)
         // 先清空文件列表、停止loading（避免转圈残留），再触发新的刷新
         _state.value = _state.value.copy(
@@ -162,7 +164,7 @@ class WebDavViewModel : ViewModel() {
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
             _state.value.currentAccount?.let {
-                pathStore.saveLastPath(it.id, entry.path)
+                if (it.rememberLastPath) pathStore.saveLastPath(it.id, entry.path)
             }
             val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, entry.path) }
                 ?: (SortMode.NAME to true)
@@ -190,7 +192,7 @@ class WebDavViewModel : ViewModel() {
         if (path.isEmpty() || path == "/") return
         val parent = path.substringBeforeLast('/').ifEmpty { "/" }
         _state.value.currentAccount?.let {
-            pathStore.saveLastPath(it.id, parent)
+            if (it.rememberLastPath) pathStore.saveLastPath(it.id, parent)
         }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, parent) }
             ?: (SortMode.NAME to true)
@@ -208,7 +210,7 @@ class WebDavViewModel : ViewModel() {
     fun navigateTo(path: String) {
         val normalized = path.trim().ifEmpty { "/" }
         _state.value.currentAccount?.let {
-            pathStore.saveLastPath(it.id, normalized)
+            if (it.rememberLastPath) pathStore.saveLastPath(it.id, normalized)
         }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, normalized) }
             ?: (SortMode.NAME to true)
