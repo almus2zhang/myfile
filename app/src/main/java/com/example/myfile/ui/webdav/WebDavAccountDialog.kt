@@ -46,6 +46,12 @@ fun WebDavAccountDialog(
     var encryptPassword by remember { mutableStateOf(initial?.encryptPassword ?: "") }
     var encryptPasswordVisible by remember { mutableStateOf(false) }
     var rememberLastPath by remember { mutableStateOf(initial?.rememberLastPath ?: true) }
+    // 改名下载的最小文件大小阈值（MB），范围 1M - 10M
+    var renameThresholdMb by remember {
+        mutableFloatStateOf(
+            (initial?.renameThresholdBytes ?: (5L * 1024 * 1024)).toFloat() / (1024 * 1024)
+        )
+    }
     var isDynamic by remember { mutableStateOf(initial?.isDynamic ?: false) }
     var resolvedUrl by remember { mutableStateOf(initial?.resolvedUrl ?: "") }
     var extraPorts by remember { mutableStateOf(initial?.extraUrls?.joinToString(",") { extractPort(it) } ?: "") }
@@ -211,10 +217,44 @@ fun WebDavAccountDialog(
                 SettingsCard {
                     OptionSwitch(
                         title = "改名下载（加速下载）",
-                        subtitle = "点击 APK 或大于 5M 文件时采用改名多线程加速下载，绕过运营商限速",
+                        subtitle = "下载前临时改名为 .avi，绕过运营商限速，完成后自动改回",
                         checked = renameToVideoExt,
                         onCheckedChange = { renameToVideoExt = it }
                     )
+                    // 开启改名下载后，显示大小阈值设定（1M - 10M）
+                    if (renameToVideoExt) {
+                        Spacer(Modifier.height(6.dp))
+                        Column(modifier = Modifier.padding(horizontal = 4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "大小阈值",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "${renameThresholdMb.toInt()} MB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = renameThresholdMb,
+                                onValueChange = { renameThresholdMb = it },
+                                valueRange = 1f..10f,
+                                steps = 8
+                            )
+                            Text(
+                                "仅当文件大于此值时才改名加速（小文件改名收益低，还可能增加延时）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     HorizontalDivider(
                         modifier = Modifier.padding(vertical = 2.dp),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -299,7 +339,8 @@ fun WebDavAccountDialog(
                                 streamFakeAvi = streamFakeAvi,
                                 isEncrypted = isEncrypted,
                                 encryptPassword = encryptPassword,
-                                rememberLastPath = rememberLastPath
+                                rememberLastPath = rememberLastPath,
+                                renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024
                             )
                             kotlinx.coroutines.GlobalScope.launch {
                                 val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
@@ -358,7 +399,8 @@ fun WebDavAccountDialog(
                             streamFakeAvi = streamFakeAvi,
                             isEncrypted = isEncrypted,
                             encryptPassword = encryptPassword,
-                            rememberLastPath = rememberLastPath
+                            rememberLastPath = rememberLastPath,
+                            renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024
                         )
                     )
                 }

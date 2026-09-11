@@ -645,6 +645,18 @@ fun LocalScreen(
                             Spacer(Modifier.height(2.dp))
                             Text(text = "全选", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = if (state.sortedFiles.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                         }
+                        val canShare = state.selected.isNotEmpty()
+                        Column(modifier = Modifier.weight(1f).clickable(enabled = canShare) {
+                            val files = state.selected.mapNotNull { path ->
+                                val e = state.sortedFiles.find { it.path == path }
+                                if (e == null || e.isDirectory) null else java.io.File(path)
+                            }
+                            if (files.isNotEmpty()) com.example.myfile.core.FileSharer.shareFiles(context, files)
+                        }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(imageVector = Icons.Filled.Share, contentDescription = "分享", tint = if (canShare) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.height(2.dp))
+                            Text(text = if (canShare) "分享(${state.selected.size})" else "分享", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = if (canShare) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
                         val canCopy = state.selected.isNotEmpty()
                         Column(modifier = Modifier.weight(1f).clickable(enabled = canCopy) { vm.copySelected() }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Icon(imageVector = Icons.Filled.ContentCopy, contentDescription = "复制", tint = if (canCopy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), modifier = Modifier.size(22.dp))
@@ -842,6 +854,7 @@ fun LocalScreen(
                                                     DropdownMenuItem(text = { Text("编辑文本") }, leadingIcon = { Icon(Icons.Filled.EditNote, null) }, onClick = { showMenu = false; editingTextEntry = entry })
                                                 }
                                                 DropdownMenuItem(text = { Text("打开为…") }, leadingIcon = { Icon(Icons.Filled.OpenInNew, null) }, onClick = { showMenu = false; openEntry(forceChooser = true) })
+                                                DropdownMenuItem(text = { Text("分享") }, leadingIcon = { Icon(Icons.Filled.Share, null) }, onClick = { showMenu = false; com.example.myfile.core.FileSharer.shareFile(context, java.io.File(entry.path)) })
                                             }
                                             DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Filled.Edit, null) }, onClick = { showMenu = false; renamingEntry = entry })
                                             DropdownMenuItem(text = { Text("属性") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { showMenu = false; propertiesEntry = entry })

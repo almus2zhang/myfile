@@ -839,7 +839,59 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             )
                         }
 
-                        // 2. 复制
+                        // 2. 分享（下载选中文件到缓存后调用系统分享面板）
+                        val canShare = state.selected.isNotEmpty()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = canShare) {
+                                    val accForShare = state.currentAccount ?: return@clickable
+                                    val authForShare = "Basic " + java.util.Base64.getEncoder()
+                                        .encodeToString("${accForShare.username}:${accForShare.password}".toByteArray())
+                                    val baseForShare = accForShare.url.trimEnd('/')
+                                    scope.launch {
+                                        val files = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            state.selected.mapNotNull { path ->
+                                                val e = state.sortedFiles.find { it.path == path }
+                                                if (e == null || e.isDirectory) null
+                                                else {
+                                                    val p = if (path.startsWith("/")) path else "/$path"
+                                                    com.example.myfile.core.FileOpener.downloadToCache(
+                                                        client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                        authHeader = authForShare,
+                                                        url = baseForShare + p,
+                                                        fileName = e.name
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (files.isNotEmpty()) {
+                                            com.example.myfile.core.FileSharer.shareFiles(
+                                                context.applicationContext,
+                                                files
+                                            )
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = "分享",
+                                tint = if (canShare) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = if (canShare) "分享(${state.selected.size})" else "分享",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = if (canShare) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        // 3. 复制
                         val canCopy = state.selected.isNotEmpty()
                         Column(
                             modifier = Modifier
@@ -1431,6 +1483,32 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                         onClick = {
                                                             showMenu = false
                                                             startAcceleratedDownload(entry, forceRename = true)
+                                                        }
+                                                    )
+                                                }
+                                                if (!entry.isDirectory) {
+                                                    // 分享：下载到缓存后调用系统分享面板
+                                                    DropdownMenuItem(
+                                                        text = { Text("分享") },
+                                                        leadingIcon = { Icon(Icons.Filled.Share, null) },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            scope.launch {
+                                                                val tmp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                                    com.example.myfile.core.FileOpener.downloadToCache(
+                                                                        client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                                        authHeader = auth ?: "",
+                                                                        url = fullUrl,
+                                                                        fileName = entry.name
+                                                                    )
+                                                                }
+                                                                if (tmp != null) {
+                                                                    com.example.myfile.core.FileSharer.shareFile(
+                                                                        context.applicationContext,
+                                                                        tmp
+                                                                    )
+                                                                }
+                                                            }
                                                         }
                                                     )
                                                 }

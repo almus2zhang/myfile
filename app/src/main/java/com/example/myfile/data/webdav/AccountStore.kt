@@ -40,7 +40,8 @@ class AccountStore(private val context: Context) {
                         streamFakeAvi = o.optBoolean("streamFakeAvi", false),
                         isEncrypted = o.optBoolean("isEncrypted", false),
                         encryptPassword = o.optString("encryptPassword", ""),
-                        rememberLastPath = o.optBoolean("rememberLastPath", true)
+                        rememberLastPath = o.optBoolean("rememberLastPath", true),
+                        renameThresholdBytes = o.optLong("renameThresholdBytes", 5L * 1024 * 1024)
                     )
                 }
             } catch (e: Exception) { emptyList() }
@@ -67,6 +68,7 @@ class AccountStore(private val context: Context) {
                     put("isEncrypted", a.isEncrypted)
                     put("encryptPassword", a.encryptPassword)
                     put("rememberLastPath", a.rememberLastPath)
+                    put("renameThresholdBytes", a.renameThresholdBytes)
                 })
             }
             p[key] = arr.toString()

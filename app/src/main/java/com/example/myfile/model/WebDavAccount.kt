@@ -13,7 +13,9 @@ data class WebDavAccount(
     val streamFakeAvi: Boolean = false,         // 视频播放伪装 .avi 后缀加速
     val isEncrypted: Boolean = false,           // 是否加密保护
     val encryptPassword: String = "",           // 解锁密码（若为空则使用 WebDav 密码）
-    val rememberLastPath: Boolean = true        // 是否记住并恢复上次浏览的目录路径
+    val rememberLastPath: Boolean = true,       // 是否记住并恢复上次浏览的目录路径
+    // 改名下载（伪装 .avi）的最小文件大小阈值，低于此值不改名，单位字节，默认 5MB
+    val renameThresholdBytes: Long = 5L * 1024 * 1024
 ) {
     /** 实际用于连接的有效地址：若为动态类别且有解析出的地址，则优先使用解析地址；否则使用原始配置地址 */
     fun connectionUrl(): String = if (isDynamic && resolvedUrl.isNotBlank()) resolvedUrl else url

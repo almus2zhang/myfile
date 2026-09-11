@@ -40,6 +40,46 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
 
+            // 单连接模式开关（放在最上面：开启后隐藏分片/连接数设置）
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (s.singleConnectionMode)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "单连接下载模式",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (s.singleConnectionMode)
+                                "已开启：使用单连接完整下载，分片大小与并发连接数设置已隐藏"
+                            else
+                                "不用 Range 分片，用单连接完整下载（模拟 CX 文件浏览器，可能绕过限速）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = s.singleConnectionMode,
+                        onCheckedChange = { vm.updateSingleConnection(it) }
+                    )
+                }
+            }
+
+            // 以下分片/并发设置仅在「非单连接模式」下显示
+            if (!s.singleConnectionMode) {
             // 分片大小
             Section(title = stringResource(R.string.settings_chunk_size)) {
                 Row(
@@ -98,47 +138,6 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 )
             }
 
-            // 连接超时
-            Section(title = stringResource(R.string.settings_connect_timeout)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = s.connectTimeoutSec.toString(),
-                        onValueChange = { it.toLongOrNull()?.let { vm.updateConnectTimeout(it) } },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            // 读取超时
-            Section(title = stringResource(R.string.settings_read_timeout)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = s.readTimeoutSec.toString(),
-                        onValueChange = { it.toLongOrNull()?.let { vm.updateReadTimeout(it) } },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            // 单连接模式开关
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("单连接下载模式", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "不用 Range 分片，用单连接完整下载（模拟 CX 文件浏览器，可能绕过限速）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = s.singleConnectionMode,
-                    onCheckedChange = { vm.updateSingleConnection(it) }
-                )
             }
 
             // 流式节奏模式开关

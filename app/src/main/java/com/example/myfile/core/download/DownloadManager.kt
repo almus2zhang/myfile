@@ -123,7 +123,15 @@ class DownloadManager(
         // 绕过运营商按 Content-Type / 扩展名的限速，下载完成后改回原名。
         // 仅影响远程路径，本地文件名保持原名不变。
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        val shouldRename = (forceRename || account.renameToVideoExt) && ext != "avi"
+        // 只有文件大小达到该账户配置的阈值才改名（forceRename 为手动强制，不受阈值限制）
+        val meetsThreshold = forceRename || totalBytes >= account.renameThresholdBytes.coerceAtLeast(0)
+        val shouldRename = meetsThreshold && (forceRename || account.renameToVideoExt) && ext != "avi"
+        if (account.renameToVideoExt && ext != "avi" && !meetsThreshold) {
+            DownloadLog.log(
+                TAG,
+                "skip rename: size ${totalBytes}B < threshold ${account.renameThresholdBytes}B ($fileName)"
+            )
+        }
         // 实际下载用的远程路径（可能被改名为 .avi）
         val downloadPath: String
         if (shouldRename) {
@@ -469,7 +477,9 @@ class DownloadManager(
         if (task.status == TransferStatus.COMPLETED.name) return@withContext
         val settings = settingsProvider()
         val ext = task.fileName.substringAfterLast('.', "").lowercase()
-        val shouldRename = settings.renameToVideoExt && ext != "avi"
+        // 同样遵循该账户配置的大小阈值
+        val meetsThreshold = task.totalBytes >= account.renameThresholdBytes.coerceAtLeast(0)
+        val shouldRename = meetsThreshold && settings.renameToVideoExt && ext != "avi"
         val client = clientProvider(account)
         val downloadPath: String
         if (shouldRename) {
