@@ -203,6 +203,11 @@ fun FilePropertiesDialog(
             }
         },
         confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        dismissButton = {
             TextButton(
                 onClick = {
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -213,11 +218,6 @@ fun FilePropertiesDialog(
                 Icon(Icons.Filled.ContentCopy, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("复制路径")
-            }
-        },
-        dismissButton = {
-            Button(onClick = onDismiss) {
-                Text("关闭")
             }
         }
     )
