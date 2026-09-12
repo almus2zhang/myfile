@@ -42,7 +42,8 @@ class AccountStore(private val context: Context) {
                         encryptPassword = o.optString("encryptPassword", ""),
                         rememberLastPath = o.optBoolean("rememberLastPath", true),
                         renameThresholdBytes = o.optLong("renameThresholdBytes", 5L * 1024 * 1024),
-                        indexPath = o.optString("indexPath", "")
+                        indexPath = o.optString("indexPath", ""),
+                        autoDownloadIndex = o.optBoolean("autoDownloadIndex", false)
                     )
                 }
             } catch (e: Exception) { emptyList() }
@@ -71,6 +72,7 @@ class AccountStore(private val context: Context) {
                     put("rememberLastPath", a.rememberLastPath)
                     put("renameThresholdBytes", a.renameThresholdBytes)
                     put("indexPath", a.indexPath)
+                    put("autoDownloadIndex", a.autoDownloadIndex)
                 })
             }
             p[key] = arr.toString()

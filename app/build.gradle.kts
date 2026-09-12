@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.myfile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 109
-        versionName = "1.1.9"
+        versionCode = 111
+        versionName = "1.2.1"
     }
 
     signingConfigs {

@@ -18,7 +18,9 @@ data class WebDavAccount(
     val renameThresholdBytes: Long = 5L * 1024 * 1024,
     // 索引文件路径：为空则不启用索引搜索；以 .json 结尾则直接用该文件；
     // 否则视为目录，在该目录下查找 webdav_index.json
-    val indexPath: String = ""
+    val indexPath: String = "",
+    // 自动下载索引：true 为自动下载（切换配置时后台自动检查服务器更新并同步），false 为手动按需下载
+    val autoDownloadIndex: Boolean = false
 ) {
     /** 实际用于连接的有效地址：若为动态类别且有解析出的地址，则优先使用解析地址；否则使用原始配置地址 */
     fun connectionUrl(): String = if (isDynamic && resolvedUrl.isNotBlank()) resolvedUrl else url

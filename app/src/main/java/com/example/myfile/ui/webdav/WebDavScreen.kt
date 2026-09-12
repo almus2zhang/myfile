@@ -175,6 +175,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val searchResults by vm.searchResults.collectAsState()
     val searchLoading by vm.searchLoading.collectAsState()
     val indexTotal by vm.indexTotal.collectAsState()
+    val indexSyncing by vm.indexSyncing.collectAsState()
+    val indexSyncMessage by vm.indexSyncMessage.collectAsState()
+    val indexProgress by vm.indexProgress.collectAsState()
     val searchEntryPath by vm.searchEntryPath.collectAsState()
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -254,6 +257,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        vm.userMessage.collect { msg: String ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // 系统返回键优先级：搜索模式 → 关闭搜索；多选模式 → 取消多选；搜索子导航 → 逐层回退直到返回搜索结果；否则回到上一层目录
     BackHandler(enabled = searchMode || searchEntryPath != null || state.multiSelectMode || state.currentPath != "/") {
@@ -1080,37 +1089,72 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { vm.onSearchQueryChange(it) },
-                            placeholder = { Text("搜索索引，如 abc .p", style = MaterialTheme.typography.bodyMedium) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            textStyle = MaterialTheme.typography.bodyMedium,
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(focusRequester),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                focusedContainerColor = MaterialTheme.colorScheme.surface
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
                             )
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        IconButton(onClick = { vm.exitSearch() }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Filled.Close, contentDescription = "退出搜索", modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { vm.onSearchQueryChange(it) },
+                                placeholder = { Text("搜索索引，如 abc .p", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(focusRequester),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface
+                                )
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            IconButton(
+                                onClick = { vm.refreshIndex() },
+                                enabled = !indexSyncing,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                if (indexSyncing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Sync,
+                                        contentDescription = "强制刷新索引",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(2.dp))
+                            IconButton(onClick = { vm.exitSearch() }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Filled.Close, contentDescription = "退出搜索", modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (indexProgress.isDownloading) {
+                            if (indexProgress.percentage >= 0) {
+                                LinearProgressIndicator(
+                                    progress = { indexProgress.percentage / 100f },
+                                    modifier = Modifier.fillMaxWidth().height(3.dp)
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth().height(3.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1266,14 +1310,67 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         .fillMaxSize()
                         .nestedScroll(pullRefreshState.nestedScrollConnection)
                 ) {
-                    if (state.sortedFiles.isEmpty()) {
+                    val displayEntries =
+                        if (searchMode) state.sortEntries(searchResults)
+                        else state.sortedFiles
+
+                    if (searchMode && (searchLoading || indexSyncing) && displayEntries.isEmpty()) {
+                        // 搜索正在加载或索引下载中，且无结果时展示明确提示
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = indexProgress.message.ifBlank { indexSyncMessage ?: "正在下载索引文件，请稍候..." },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (indexProgress.percentage >= 0) {
+                                    Spacer(Modifier.height(8.dp))
+                                    LinearProgressIndicator(
+                                        progress = { indexProgress.percentage / 100f },
+                                        modifier = Modifier.width(200.dp).height(4.dp).clip(RoundedCornerShape(2.dp))
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "提示：可在账户设置中开启自动下载索引",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    } else if (displayEntries.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .verticalScroll(rememberScrollState()),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("此文件夹为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = if (searchMode) {
+                                        if (searchQuery.isBlank()) {
+                                            if (indexTotal > 0) "输入关键词搜索（共 $indexTotal 条索引）"
+                                            else "暂无本地索引，点击右上方按钮刷新索引"
+                                        } else {
+                                            "未找到匹配的文件（共检索 $indexTotal 条索引）"
+                                        }
+                                    } else "此文件夹为空",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (searchMode && indexSyncMessage != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = indexSyncMessage!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                         }
                     } else {
                         // 响应式宫格布局：详细视图与简洁视图窄屏 1 列，宽屏自适应多列；宫格视图多列排列
@@ -1302,10 +1399,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             },
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            // 搜索结果同样应用当前排序与隐藏文件过滤规则
-                            val displayEntries =
-                                if (searchMode) state.sortEntries(searchResults)
-                                else state.sortedFiles
                             items(displayEntries, key = { it.path }) { entry: FileEntry ->
                                 val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                                 val fullUrl = base + p

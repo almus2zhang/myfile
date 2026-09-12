@@ -9,6 +9,9 @@ import com.example.myfile.model.WebDavAccount
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 
 import com.example.myfile.model.ViewMode
@@ -163,10 +166,23 @@ class WebDavViewModel : ViewModel() {
                 if (!initialized && cur != null) {
                     initialized = true
                     refresh()
+                    checkAutoSyncIndex(cur)
                 } else if (initialized && cur != null && prev.accounts != list) {
                     refresh()
+                    checkAutoSyncIndex(cur)
                 }
             }
+        }
+    }
+
+    private fun checkAutoSyncIndex(account: WebDavAccount) {
+        // 先从本地磁盘秒级预热索引
+        com.example.myfile.core.WebDavIndex.warmupFromDisk(account.id)?.let {
+            _indexTotal.value = it.size
+        }
+        // 若开启了自动下载且配置了索引路径，在后台自动检查更新
+        if (account.autoDownloadIndex && account.indexPath.isNotBlank()) {
+            syncIndex(account, forceRefresh = false)
         }
     }
 
@@ -194,6 +210,7 @@ class WebDavViewModel : ViewModel() {
             error = null
         )
         refresh()
+        checkAutoSyncIndex(account)
     }
 
     fun open(entry: FileEntry) {
@@ -477,6 +494,22 @@ class WebDavViewModel : ViewModel() {
     private val _indexTotal = MutableStateFlow(0)
     val indexTotal: StateFlow<Int> = _indexTotal.asStateFlow()
 
+    /** 索引同步状态消息（如“正在下载索引文件 (1.2 MB)...”或“检查服务器更新...”） */
+    private val _indexSyncMessage = MutableStateFlow<String?>(null)
+    val indexSyncMessage: StateFlow<String?> = _indexSyncMessage.asStateFlow()
+
+    /** 详细下载进度信息（包含百分比、字节数） */
+    private val _indexProgress = MutableStateFlow(com.example.myfile.core.WebDavIndex.IndexProgress())
+    val indexProgress: StateFlow<com.example.myfile.core.WebDavIndex.IndexProgress> = _indexProgress.asStateFlow()
+
+    /** 用于弹窗或界面的瞬态提示信息 */
+    private val _userMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
+
+    /** 索引是否正在同步中 */
+    private val _indexSyncing = MutableStateFlow(false)
+    val indexSyncing: StateFlow<Boolean> = _indexSyncing.asStateFlow()
+
     /**
      * 从搜索结果进入文件夹时记录的起始路径（非 null 表示当前处于"搜索→文件夹"子导航状态）。
      * 当回退到此路径时，按返回键将恢复搜索结果而非继续向上导航。
@@ -489,6 +522,15 @@ class WebDavViewModel : ViewModel() {
         _searchMode.value = true
         _searchQuery.value = ""
         _searchResults.value = emptyList()
+        val acc = _state.value.currentAccount ?: return
+        // 先从本地磁盘秒级预热
+        val cached = com.example.myfile.core.WebDavIndex.warmupFromDisk(acc.id)
+        if (cached != null) {
+            _indexTotal.value = cached.size
+        } else if (acc.indexPath.isNotBlank()) {
+            // 本地完全没有索引，且配置了索引路径，按需触发一次同步
+            syncIndex(acc, forceRefresh = false)
+        }
     }
 
     /** 退出搜索模式，恢复普通列表 */
@@ -498,6 +540,64 @@ class WebDavViewModel : ViewModel() {
         _searchResults.value = emptyList()
         _searchLoading.value = false
         _searchEntryPath.value = null
+    }
+
+    /** 同步索引文件（自动检查服务器更新；若 forceRefresh 为 true 则强制全量重新下载） */
+    fun syncIndex(
+        account: WebDavAccount,
+        forceRefresh: Boolean = false,
+        onComplete: ((com.example.myfile.core.WebDavIndex.SyncResult) -> Unit)? = null
+    ) {
+        if (account.indexPath.isBlank()) {
+            _userMessage.tryEmit("未配置索引文件路径")
+            return
+        }
+        viewModelScope.launch {
+            _indexSyncing.value = true
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    com.example.myfile.core.WebDavIndex.syncIndex(
+                        client = MyApp.instance.okHttpClient,
+                        account = account,
+                        forceRefresh = forceRefresh,
+                        onProgress = { prog ->
+                            _indexProgress.value = prog
+                            _indexSyncMessage.value = prog.message
+                        }
+                    )
+                }
+                when (result) {
+                    is com.example.myfile.core.WebDavIndex.SyncResult.UpToDate -> {
+                        _indexTotal.value = result.count
+                        val msg = "索引已是最新 (共 ${result.count} 条)"
+                        _indexSyncMessage.value = msg
+                        _userMessage.tryEmit(msg)
+                    }
+                    is com.example.myfile.core.WebDavIndex.SyncResult.Downloaded -> {
+                        _indexTotal.value = result.count
+                        val msg = "索引下载成功 (共 ${result.count} 条)"
+                        _indexSyncMessage.value = msg
+                        _userMessage.tryEmit(msg)
+                    }
+                    is com.example.myfile.core.WebDavIndex.SyncResult.Error -> {
+                        _indexSyncMessage.value = result.message
+                        _userMessage.tryEmit(result.message)
+                    }
+                }
+                // 同步完成后如果当前正处于搜索模式且有关键词，自动重新检索
+                if (_searchMode.value && _searchQuery.value.isNotBlank()) {
+                    performSearch(_searchQuery.value)
+                }
+                onComplete?.invoke(result)
+            } catch (e: Exception) {
+                Log.e("WebDavVM", "syncIndex failed", e)
+                val err = "索引同步异常: ${e.message}"
+                _indexSyncMessage.value = err
+                _userMessage.tryEmit(err)
+            } finally {
+                _indexSyncing.value = false
+            }
+        }
     }
 
     /**
@@ -537,14 +637,35 @@ class WebDavViewModel : ViewModel() {
     /** 更新关键词并执行搜索 */
     fun onSearchQueryChange(q: String) {
         _searchQuery.value = q
-        val acc = _state.value.currentAccount
-        if (acc == null) return
+        performSearch(q)
+    }
+
+    private fun performSearch(q: String) {
+        val acc = _state.value.currentAccount ?: return
+        if (q.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
         val keywords = com.example.myfile.core.WebDavIndex.parseKeywords(q)
         viewModelScope.launch {
             _searchLoading.value = true
             try {
-                val index = withContext(Dispatchers.IO) {
-                    com.example.myfile.core.WebDavIndex.loadIndex(MyApp.instance.okHttpClient, acc)
+                // 优先从内存或本地磁盘取已有索引，无需等待网络
+                var index = com.example.myfile.core.WebDavIndex.getAvailableIndex(acc.id)
+                if (index.isEmpty()) {
+                    // 本地完全没有索引，按需下载
+                    withContext(Dispatchers.IO) {
+                        com.example.myfile.core.WebDavIndex.syncIndex(
+                            MyApp.instance.okHttpClient,
+                            acc,
+                            forceRefresh = false,
+                            onProgress = { prog ->
+                                _indexProgress.value = prog
+                                _indexSyncMessage.value = prog.message
+                            }
+                        )
+                    }
+                    index = com.example.myfile.core.WebDavIndex.getAvailableIndex(acc.id)
                 }
                 _indexTotal.value = index.size
                 val matched = withContext(Dispatchers.Default) {
@@ -562,11 +683,18 @@ class WebDavViewModel : ViewModel() {
         }
     }
 
-    /** 强制重新加载索引 */
+    /** 强制重新同步索引（忽略服务器未更新判断，全量拉取） */
     fun refreshIndex() {
-        val acc = _state.value.currentAccount ?: return
-        com.example.myfile.core.WebDavIndex.clearCache(acc.id)
-        onSearchQueryChange(_searchQuery.value)
+        val acc = _state.value.currentAccount ?: run {
+            _userMessage.tryEmit("当前无生效的 WebDAV 账户")
+            return
+        }
+        if (_indexSyncing.value) {
+            _userMessage.tryEmit("正在下载索引中，请稍候...")
+            return
+        }
+        _userMessage.tryEmit("开始检查并下载索引文件...")
+        syncIndex(acc, forceRefresh = true)
     }
 
     fun saveAccount(account: WebDavAccount) {

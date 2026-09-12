@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -48,6 +49,8 @@ fun WebDavAccountDialog(
     var rememberLastPath by remember { mutableStateOf(initial?.rememberLastPath ?: true) }
     // 索引文件路径（留空不启用搜索）
     var indexPath by remember { mutableStateOf(initial?.indexPath ?: "") }
+    // 自动下载索引：true 自动下载并检测服务器更新，false 手动按需下载
+    var autoDownloadIndex by remember { mutableStateOf(initial?.autoDownloadIndex ?: false) }
     // 改名下载的最小文件大小阈值（MB），范围 1M - 10M
     var renameThresholdMb by remember {
         mutableFloatStateOf(
@@ -59,6 +62,30 @@ fun WebDavAccountDialog(
     var extraPorts by remember { mutableStateOf(initial?.extraUrls?.joinToString(",") { extractPort(it) } ?: "") }
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+
+    // 手动下载索引相关状态
+    val coroutineScope = rememberCoroutineScope()
+    var isDownloadingIndex by remember { mutableStateOf(false) }
+    var indexProgressText by remember { mutableStateOf<String?>(null) }
+    var indexProgressFraction by remember { mutableFloatStateOf(-1f) }
+    var localIndexInfo by remember { mutableStateOf("") }
+
+    val updateLocalIndexInfo: () -> Unit = {
+        val accId = initial?.id ?: 0L
+        val meta = com.example.myfile.core.WebDavIndex.loadMetadata(accId)
+        val file = com.example.myfile.core.WebDavIndex.getIndexFile(accId)
+        localIndexInfo = if (file.exists() && file.length() > 0) {
+            val sizeStr = if (file.length() >= 1024 * 1024) String.format("%.1f MB", file.length().toDouble() / (1024 * 1024))
+                          else "${file.length() / 1024} KB"
+            "✓ 本地已保存 (共 ${meta.totalCount} 条，大小 $sizeStr)"
+        } else {
+            "本地暂未下载"
+        }
+    }
+
+    LaunchedEffect(initial) {
+        updateLocalIndexInfo()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -235,6 +262,119 @@ fun WebDavAccountDialog(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
+                    if (indexPath.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        OptionSwitch(
+                            title = "自动下载索引",
+                            subtitle = "开启后连接此配置时后台自动检查更新；关闭则仅在搜索时手动按需下载",
+                            checked = autoDownloadIndex,
+                            onCheckedChange = { autoDownloadIndex = it }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "本地配置存储",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            localIndexInfo.ifEmpty { "本地暂未下载" },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (localIndexInfo.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            val cleanUrl = cleanWebDavUrl(url)
+                                            val probe = WebDavAccount(
+                                                id = initial?.id ?: 0L,
+                                                name = name.trim().ifBlank { "account" },
+                                                url = cleanUrl,
+                                                username = user.trim(),
+                                                password = pass,
+                                                indexPath = indexPath.trim(),
+                                                autoDownloadIndex = autoDownloadIndex
+                                            )
+                                            isDownloadingIndex = true
+                                            indexProgressText = "连接服务器检查并下载..."
+                                            indexProgressFraction = -1f
+                                            coroutineScope.launch {
+                                                try {
+                                                    val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                        com.example.myfile.core.WebDavIndex.syncIndex(
+                                                            client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                            account = probe,
+                                                            forceRefresh = true,
+                                                            onProgress = { prog ->
+                                                                indexProgressText = prog.message
+                                                                indexProgressFraction = if (prog.percentage >= 0) prog.percentage / 100f else -1f
+                                                            }
+                                                        )
+                                                    }
+                                                    when (res) {
+                                                        is com.example.myfile.core.WebDavIndex.SyncResult.Downloaded -> {
+                                                            indexProgressText = "✓ 成功下载并保存 ${res.count} 条记录"
+                                                            updateLocalIndexInfo()
+                                                        }
+                                                        is com.example.myfile.core.WebDavIndex.SyncResult.UpToDate -> {
+                                                            indexProgressText = "✓ 索引已是最新 (${res.count} 条)"
+                                                            updateLocalIndexInfo()
+                                                        }
+                                                        is com.example.myfile.core.WebDavIndex.SyncResult.Error -> {
+                                                            indexProgressText = "✗ ${res.message}"
+                                                        }
+                                                    }
+                                                } catch (e: Exception) {
+                                                    indexProgressText = "✗ 下载异常: ${e.message}"
+                                                } finally {
+                                                    isDownloadingIndex = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isDownloadingIndex && url.isNotBlank() && user.isNotBlank(),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        if (isDownloadingIndex) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                            Spacer(Modifier.width(6.dp))
+                                        }
+                                        Text(if (isDownloadingIndex) "下载中" else "立即手动下载", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                                if (isDownloadingIndex && indexProgressFraction >= 0f) {
+                                    LinearProgressIndicator(
+                                        progress = { indexProgressFraction },
+                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                    )
+                                } else if (isDownloadingIndex) {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                    )
+                                }
+                                if (!indexProgressText.isNullOrBlank()) {
+                                    Text(
+                                        indexProgressText!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (indexProgressText!!.startsWith("✓")) MaterialTheme.colorScheme.primary
+                                                else if (indexProgressText!!.startsWith("✗")) MaterialTheme.colorScheme.error
+                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // ============ 加速选项分组 ============
@@ -369,7 +509,8 @@ fun WebDavAccountDialog(
                                 encryptPassword = encryptPassword,
                                 rememberLastPath = rememberLastPath,
                                 renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024,
-                                indexPath = indexPath
+                                indexPath = indexPath,
+                                autoDownloadIndex = autoDownloadIndex
                             )
                             kotlinx.coroutines.GlobalScope.launch {
                                 val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
@@ -430,7 +571,8 @@ fun WebDavAccountDialog(
                             encryptPassword = encryptPassword,
                             rememberLastPath = rememberLastPath,
                             renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024,
-                            indexPath = indexPath
+                            indexPath = indexPath,
+                            autoDownloadIndex = autoDownloadIndex
                         )
                     )
                 }
