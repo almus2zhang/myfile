@@ -30,6 +30,7 @@ fun FileCompactItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    parentPath: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -54,13 +55,26 @@ fun FileCompactItem(
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        Text(
-            text = entry.name,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!parentPath.isNullOrBlank()) {
+                Text(
+                    text = parentPath,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
 
         if (!entry.isDirectory) {
             Spacer(modifier = Modifier.width(8.dp))

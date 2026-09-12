@@ -56,6 +56,7 @@ import com.example.myfile.core.FileOpener
 import com.example.myfile.core.StreamProxy
 import com.example.myfile.data.db.entity.VideoProgressEntity
 import com.example.myfile.model.FileEntry
+import com.example.myfile.model.parentDirectory
 import com.example.myfile.ui.components.FileListItem
 import com.example.myfile.ui.components.ImageViewerDialog
 import com.example.myfile.ui.components.OpenWithDialog
@@ -1776,6 +1777,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     }
                                 }
 
+                                val itemParentPath = if (searchMode) entry.parentDirectory else null
+
                                 when (viewMode) {
                                     ViewMode.DETAILS -> {
                                         Column {
@@ -1790,6 +1793,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 videoDurationMs = durMs,
                                                 videoPositionMs = posMs,
                                                 isSelected = entry.path in state.selected,
+                                                parentPath = itemParentPath,
                                                 onClick = onItemClick,
                                                 onLongClick = onItemLongClick,
                                                 trailing = trailingMenu
@@ -1807,6 +1811,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
+                                            parentPath = itemParentPath,
                                             isLarge = true,
                                             showBorder = false,
                                             trailing = trailingMenu
@@ -1823,6 +1828,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
+                                            parentPath = itemParentPath,
                                             isLarge = false,
                                             showBorder = false,
                                             trailing = trailingMenu
@@ -1834,6 +1840,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             onClick = onItemClick,
                                             onLongClick = onItemLongClick,
                                             isSelected = entry.path in state.selected,
+                                            parentPath = itemParentPath,
                                             trailing = trailingMenu
                                         )
                                     }

@@ -48,6 +48,7 @@ fun FileListItem(
     videoProgress: Float? = null,
     videoDurationMs: Long? = null,
     videoPositionMs: Long? = null,
+    parentPath: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -230,6 +231,16 @@ fun FileListItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
+                )
+            }
+
+            if (!parentPath.isNullOrBlank()) {
+                Text(
+                    text = parentPath,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

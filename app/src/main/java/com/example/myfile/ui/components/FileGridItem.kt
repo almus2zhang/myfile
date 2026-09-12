@@ -37,6 +37,7 @@ fun FileGridItem(
     thumbnailKey: String? = null,
     videoDurationMs: Long? = null,
     videoPositionMs: Long? = null,
+    parentPath: String? = null,
     isLarge: Boolean = true,
     showBorder: Boolean = true,
     trailing: @Composable (() -> Unit)? = null
@@ -177,6 +178,18 @@ fun FileGridItem(
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center
                 )
+
+                if (!parentPath.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(1.dp))
+                    Text(
+                        text = parentPath,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
             // 选中标记 或 更多操作

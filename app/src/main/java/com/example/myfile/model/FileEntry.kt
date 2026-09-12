@@ -14,3 +14,14 @@ data class FileEntry(
 )
 
 enum class FileSource { LOCAL, WEBDAV }
+
+/**
+ * 获取文件所在上级目录路径
+ */
+val FileEntry.parentDirectory: String
+    get() {
+        val trimmed = if (isDirectory) path.trimEnd('/') else path
+        val parent = trimmed.substringBeforeLast('/', missingDelimiterValue = "")
+        val normalized = if (parent.isEmpty()) "/" else parent
+        return if (normalized.startsWith("/")) normalized else "/$normalized"
+    }
