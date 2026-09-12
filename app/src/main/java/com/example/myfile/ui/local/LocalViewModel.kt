@@ -48,24 +48,50 @@ class LocalViewModel : ViewModel() {
 
     private val viewModeStore = MyApp.instance.viewModeStore
 
-    val viewMode: StateFlow<com.example.myfile.model.ViewMode> = viewModeStore.localViewMode
+    /** 当前目录的视图偏好（视图/缩略图/隐藏文件/间隔线），按目录路径记忆 */
+    val currentFolderPrefs: StateFlow<com.example.myfile.data.prefs.FolderViewPrefs> =
+        viewModeStore.currentFolderPrefs
 
-    fun setViewMode(mode: com.example.myfile.model.ViewMode) {
-        viewModeStore.setLocalViewMode(mode)
+    val viewMode: StateFlow<com.example.myfile.model.ViewMode> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.viewMode
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect { flow.value = it.viewMode }
+        }
     }
 
-    val showThumbnailsAndDuration: StateFlow<Boolean> = viewModeStore.showThumbnailsAndDuration
+    fun setViewMode(mode: com.example.myfile.model.ViewMode) {
+        viewModeStore.setViewMode(mode)
+    }
+
+    val showThumbnailsAndDuration: StateFlow<Boolean> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.showThumbnails
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect { flow.value = it.showThumbnails }
+        }
+    }
 
     fun setShowThumbnailsAndDuration(show: Boolean) {
-        viewModeStore.setShowThumbnailsAndDuration(show)
+        viewModeStore.setShowThumbnails(show)
     }
 
     fun toggleShowThumbnailsAndDuration() {
-        val current = viewModeStore.showThumbnailsAndDuration.value
-        viewModeStore.setShowThumbnailsAndDuration(!current)
+        viewModeStore.toggleShowThumbnails()
     }
 
-    val showHiddenFilesFlow: StateFlow<Boolean> = viewModeStore.showHiddenFiles
+    val showHiddenFilesFlow: StateFlow<Boolean> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.showHiddenFiles
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect {
+                flow.value = it.showHiddenFiles
+                if (_state.value.showHiddenFiles != it.showHiddenFiles) {
+                    _state.value = _state.value.copy(showHiddenFiles = it.showHiddenFiles)
+                }
+            }
+        }
+    }
 
     fun setShowHiddenFiles(show: Boolean) {
         viewModeStore.setShowHiddenFiles(show)
@@ -73,17 +99,23 @@ class LocalViewModel : ViewModel() {
     }
 
     fun toggleShowHiddenFiles() {
-        setShowHiddenFiles(!viewModeStore.showHiddenFiles.value)
+        viewModeStore.toggleShowHiddenFiles()
     }
 
     private val _durationRefreshTrigger = MutableStateFlow(0)
     val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
 
     fun forceRefreshDurations() {
-        if (!viewModeStore.showThumbnailsAndDuration.value) {
-            viewModeStore.setShowThumbnailsAndDuration(true)
+        if (!viewModeStore.currentFolderPrefs.value.showThumbnails) {
+            viewModeStore.setShowThumbnails(true)
         }
         _durationRefreshTrigger.value += 1
+    }
+
+    /** 加载指定目录的视图偏好 */
+    private fun loadFolderPrefs(path: String) {
+        val folderKey = com.example.myfile.data.prefs.ViewModeStore.buildLocalKey(path)
+        viewModeStore.loadFolder(folderKey)
     }
 
     private fun getFolderSort(path: String): Pair<com.example.myfile.ui.webdav.SortMode, Boolean> {
@@ -94,16 +126,11 @@ class LocalViewModel : ViewModel() {
     init {
         val (mode, asc) = getFolderSort(rootDir.absolutePath)
         _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
-        // 初始同步「显示隐藏文件」设置
-        _state.value = _state.value.copy(showHiddenFiles = viewModeStore.showHiddenFiles.value)
-        // 监听设置变化，实时同步到 sortedFiles 过滤
-        viewModelScope.launch {
-            viewModeStore.showHiddenFiles.collect { show ->
-                if (_state.value.showHiddenFiles != show) {
-                    _state.value = _state.value.copy(showHiddenFiles = show)
-                }
-            }
-        }
+        // 加载根目录的视图偏好
+        loadFolderPrefs(rootDir.absolutePath)
+        _state.value = _state.value.copy(
+            showHiddenFiles = viewModeStore.currentFolderPrefs.value.showHiddenFiles
+        )
         refresh()
     }
 
@@ -145,6 +172,7 @@ class LocalViewModel : ViewModel() {
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
             val (mode, asc) = getFolderSort(entry.path)
+            loadFolderPrefs(entry.path)
             _state.value = _state.value.copy(
                 currentDir = File(entry.path),
                 sortMode = mode,
@@ -158,6 +186,7 @@ class LocalViewModel : ViewModel() {
 
     fun navigateTo(dir: File) {
         val (mode, asc) = getFolderSort(dir.absolutePath)
+        loadFolderPrefs(dir.absolutePath)
         _state.value = _state.value.copy(
             currentDir = dir,
             sortMode = mode,
@@ -172,6 +201,7 @@ class LocalViewModel : ViewModel() {
         if (isAtRoot()) return
         val parent = _state.value.currentDir.parentFile ?: return
         val (mode, asc) = getFolderSort(parent.absolutePath)
+        loadFolderPrefs(parent.absolutePath)
         _state.value = _state.value.copy(
             currentDir = parent,
             sortMode = mode,

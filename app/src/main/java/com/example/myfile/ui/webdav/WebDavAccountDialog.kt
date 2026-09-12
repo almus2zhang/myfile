@@ -46,6 +46,8 @@ fun WebDavAccountDialog(
     var encryptPassword by remember { mutableStateOf(initial?.encryptPassword ?: "") }
     var encryptPasswordVisible by remember { mutableStateOf(false) }
     var rememberLastPath by remember { mutableStateOf(initial?.rememberLastPath ?: true) }
+    // 索引文件路径（留空不启用搜索）
+    var indexPath by remember { mutableStateOf(initial?.indexPath ?: "") }
     // 改名下载的最小文件大小阈值（MB），范围 1M - 10M
     var renameThresholdMb by remember {
         mutableFloatStateOf(
@@ -207,6 +209,32 @@ fun WebDavAccountDialog(
                         checked = rememberLastPath,
                         onCheckedChange = { rememberLastPath = it }
                     )
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "索引文件路径",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "用于快速搜索（留空则不启用）。若填目录，则在该目录下找 webdav_index.json；若填 .json 文件则直接使用",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = indexPath,
+                        onValueChange = { indexPath = it.replace("\r", "").replace("\n", "") },
+                        placeholder = { Text("/worksync 或 /worksync/webdav_index.json") },
+                        singleLine = true,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
 
                 // ============ 加速选项分组 ============
@@ -340,7 +368,8 @@ fun WebDavAccountDialog(
                                 isEncrypted = isEncrypted,
                                 encryptPassword = encryptPassword,
                                 rememberLastPath = rememberLastPath,
-                                renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024
+                                renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024,
+                                indexPath = indexPath
                             )
                             kotlinx.coroutines.GlobalScope.launch {
                                 val res = com.example.myfile.MyApp.instance.webDavRepository.testConnection(probe)
@@ -400,7 +429,8 @@ fun WebDavAccountDialog(
                             isEncrypted = isEncrypted,
                             encryptPassword = encryptPassword,
                             rememberLastPath = rememberLastPath,
-                            renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024
+                            renameThresholdBytes = renameThresholdMb.toLong() * 1024 * 1024,
+                            indexPath = indexPath
                         )
                     )
                 }

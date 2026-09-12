@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -167,6 +168,16 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val showThumbnailsAndDuration by vm.showThumbnailsAndDuration.collectAsState()
     val showHiddenFiles by vm.showHiddenFilesFlow.collectAsState()
     val durationRefreshTrigger by vm.durationRefreshTrigger.collectAsState()
+
+    // 索引搜索状态
+    val searchMode by vm.searchMode.collectAsState()
+    val searchQuery by vm.searchQuery.collectAsState()
+    val searchResults by vm.searchResults.collectAsState()
+    val searchLoading by vm.searchLoading.collectAsState()
+    val indexTotal by vm.indexTotal.collectAsState()
+    val searchEntryPath by vm.searchEntryPath.collectAsState()
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var lastProcessedTrigger by remember { mutableStateOf(0) }
 
     // 缩略图与时长是否启用：简洁视图不显示；其余视图受 showThumbnailsAndDuration 控制
@@ -244,13 +255,24 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // 系统返回键：如果处于多选模式则取消多选；否则回到上一层目录
-    BackHandler(enabled = state.currentPath != "/" || state.multiSelectMode) {
-        if (state.multiSelectMode) {
-            vm.clearSelection()
-        } else {
-            vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
-            vm.goUp()
+    // 系统返回键优先级：搜索模式 → 关闭搜索；多选模式 → 取消多选；搜索子导航 → 逐层回退直到返回搜索结果；否则回到上一层目录
+    BackHandler(enabled = searchMode || searchEntryPath != null || state.multiSelectMode || state.currentPath != "/") {
+        when {
+            searchMode -> vm.exitSearch()
+            state.multiSelectMode -> vm.clearSelection()
+            searchEntryPath != null -> {
+                // 从搜索进入的文件夹：逐层回退，回到入口路径时恢复搜索列表
+                if (state.currentPath == searchEntryPath) {
+                    vm.returnToSearch()
+                } else {
+                    vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                    vm.goUp()
+                }
+            }
+            else -> {
+                vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                vm.goUp()
+            }
         }
     }
 
@@ -558,6 +580,21 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 0. 索引搜索按钮（仅当该账户配置了索引路径时显示）
+                        if (!state.currentAccount?.indexPath.isNullOrBlank()) {
+                            IconButton(
+                                onClick = { if (searchMode) vm.exitSearch() else vm.enterSearch() },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (searchMode) Icons.Filled.SearchOff else Icons.Filled.Search,
+                                    contentDescription = "搜索索引",
+                                    tint = if (searchMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
                         // 1. 视图模式切换按钮
                         Box {
                             IconButton(
@@ -777,6 +814,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     }
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("新建文件夹") },
+                                    leadingIcon = { Icon(Icons.Filled.CreateNewFolder, null, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showMkdir = true
+                                        mkdirName = ""
+                                    }
+                                )
+                                DropdownMenuItem(
                                     text = { Text("设置") },
                                     leadingIcon = { Icon(Icons.Filled.Settings, null, modifier = Modifier.size(20.dp)) },
                                     onClick = {
@@ -793,9 +839,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            if (state.currentAccount != null && !state.multiSelectMode) {
-                FloatingActionButton(onClick = { showMkdir = true; mkdirName = "" }) {
-                    Icon(Icons.Filled.CreateNewFolder, "新建文件夹")
+            // 搜索按钮：仅当该账户配置了索引路径且不在搜索模式、不在多选时显示
+            if (state.currentAccount != null && !state.multiSelectMode &&
+                !state.currentAccount?.indexPath.isNullOrBlank() && !searchMode
+            ) {
+                FloatingActionButton(onClick = { vm.enterSearch() }) {
+                    Icon(Icons.Filled.Search, "搜索")
                 }
             }
         },
@@ -1023,9 +1072,55 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // 第二行：路径面包屑栏，采用微胶囊风格与平滑横向滚动，方便逐级点击跳转
+            // 第二行：搜索模式下显示搜索框，否则显示路径面包屑
             val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
-            if (state.currentAccount != null) {
+            if (searchMode) {
+                // ===== 搜索框（替代面包屑位置）=====
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { vm.onSearchQueryChange(it) },
+                            placeholder = { Text("搜索索引，如 abc .p", style = MaterialTheme.typography.bodyMedium) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(focusRequester),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                focusedContainerColor = MaterialTheme.colorScheme.surface
+                            )
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(onClick = { vm.exitSearch() }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = "退出搜索", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    focusRequester.requestFocus()
+                    // 稍作延迟以确保输入框已完成挂载，再拉起软键盘
+                    kotlinx.coroutines.delay(120)
+                    keyboardController?.show()
+                }
+            } else if (state.currentAccount != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                     modifier = Modifier.fillMaxWidth()
@@ -1034,6 +1129,36 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 从搜索进入文件夹时，显示"返回搜索"快捷标签
+                        if (searchEntryPath != null) {
+                            Surface(
+                                onClick = { vm.returnToSearch() },
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                                modifier = Modifier
+                                    .padding(start = 8.dp, top = 3.dp, bottom = 3.dp)
+                                    .height(22.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 7.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Search,
+                                        contentDescription = "返回搜索结果",
+                                        modifier = Modifier.size(12.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(
+                                        text = "返回搜索",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+
                         // 面包屑路径（可横向滚动，占剩余空间）
                         Row(
                             modifier = Modifier
@@ -1177,7 +1302,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             },
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(state.sortedFiles, key = { it.path }) { entry: FileEntry ->
+                            // 搜索结果同样应用当前排序与隐藏文件过滤规则
+                            val displayEntries =
+                                if (searchMode) state.sortEntries(searchResults)
+                                else state.sortedFiles
+                            items(displayEntries, key = { it.path }) { entry: FileEntry ->
                                 val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                                 val fullUrl = base + p
                                 val category = FileOpener.fileCategory(entry.name)
@@ -1392,7 +1521,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                         vm.toggleSelect(entry.path)
                                     } else if (entry.isDirectory) {
                                         vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
-                                        vm.open(entry)
+                                        if (searchMode) {
+                                            vm.openFromSearch(entry)  // 从搜索结果进入文件夹，保留搜索状态
+                                        } else {
+                                            vm.open(entry)            // 普通目录导航
+                                        }
                                     } else if (category == "image") {
                                         val idx = imageEntries.indexOfFirst { it.path == entry.path }
                                         if (idx >= 0) viewingImageIndex = idx
@@ -1568,10 +1701,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 onLongClick = onItemLongClick,
                                                 trailing = trailingMenu
                                             )
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(start = 74.dp),
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                            )
                                         }
                                     }
                                     ViewMode.GRID_LARGE -> {
@@ -1586,6 +1715,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
                                             isLarge = true,
+                                            showBorder = false,
                                             trailing = trailingMenu
                                         )
                                     }
@@ -1601,6 +1731,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
                                             isLarge = false,
+                                            showBorder = false,
                                             trailing = trailingMenu
                                         )
                                     }

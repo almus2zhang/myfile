@@ -38,6 +38,7 @@ fun FileGridItem(
     videoDurationMs: Long? = null,
     videoPositionMs: Long? = null,
     isLarge: Boolean = true,
+    showBorder: Boolean = true,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -55,8 +56,12 @@ fun FileGridItem(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
         ),
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-        else androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        border = if (isSelected) {
+            // 选中态边框始终显示（功能性提示）
+            androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        } else if (showBorder) {
+            androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        } else null
     ) {
         Box(
             modifier = Modifier

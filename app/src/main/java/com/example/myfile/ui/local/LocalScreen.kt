@@ -868,11 +868,11 @@ fun LocalScreen(
                                 ViewMode.DETAILS -> {
                                     Column {
                                         FileListItem(entry = entry, thumbnailUrl = thumbUrl, thumbnailKey = "local_${entry.path}", videoProgress = vProg?.let { if (it.durationMs > 0L) it.positionMs.toFloat() / it.durationMs else null }, videoDurationMs = durMs, videoPositionMs = posMs, isSelected = entry.path in state.selected, onClick = onItemClick, onLongClick = onItemLongClick, trailing = trailingMenu)
-                                        HorizontalDivider(modifier = Modifier.padding(start = 74.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
                                     }
                                 }
-                                ViewMode.GRID_LARGE -> { FileGridItem(entry = entry, onClick = onItemClick, onLongClick = onItemLongClick, isSelected = entry.path in state.selected, thumbnailUrl = thumbUrl, thumbnailKey = "local_${entry.path}", videoDurationMs = durMs, videoPositionMs = posMs, isLarge = true, trailing = trailingMenu) }
-                                ViewMode.GRID_SMALL -> { FileGridItem(entry = entry, onClick = onItemClick, onLongClick = onItemLongClick, isSelected = entry.path in state.selected, thumbnailUrl = thumbUrl, thumbnailKey = "local_${entry.path}", videoDurationMs = durMs, videoPositionMs = posMs, isLarge = false, trailing = trailingMenu) }
+                                ViewMode.GRID_LARGE -> { FileGridItem(entry = entry, onClick = onItemClick, onLongClick = onItemLongClick, isSelected = entry.path in state.selected, thumbnailUrl = thumbUrl, thumbnailKey = "local_${entry.path}", videoDurationMs = durMs, videoPositionMs = posMs, isLarge = true, showBorder = false, trailing = trailingMenu) }
+                                ViewMode.GRID_SMALL -> { FileGridItem(entry = entry, onClick = onItemClick, onLongClick = onItemLongClick, isSelected = entry.path in state.selected, thumbnailUrl = thumbUrl, thumbnailKey = "local_${entry.path}", videoDurationMs = durMs, videoPositionMs = posMs, isLarge = false, showBorder = false, trailing = trailingMenu) }
                                 ViewMode.COMPACT -> { FileCompactItem(entry = entry, onClick = onItemClick, onLongClick = onItemLongClick, isSelected = entry.path in state.selected, trailing = trailingMenu) }
                             }
                         }

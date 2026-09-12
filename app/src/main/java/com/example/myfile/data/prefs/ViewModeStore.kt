@@ -7,69 +7,115 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * 每个文件夹各自的视图偏好（与排序一样按目录路径记忆）
+ *
+ * 默认值：详细视图 / 不显示缩略图 / 不显示隐藏文件
+ */
+data class FolderViewPrefs(
+    val viewMode: ViewMode = ViewMode.DETAILS,
+    val showThumbnails: Boolean = false,
+    val showHiddenFiles: Boolean = false
+) {
+    companion object {
+        fun default() = FolderViewPrefs()
+
+        /** 从 "MODE|0|1" 格式解析 */
+        fun parse(raw: String?): FolderViewPrefs {
+            if (raw.isNullOrBlank()) return default()
+            val parts = raw.split("|")
+            val mode = parts.getOrNull(0)?.let {
+                try { ViewMode.valueOf(it) } catch (_: Exception) { null }
+            } ?: ViewMode.DETAILS
+            val thumbs = parts.getOrNull(1)?.toBooleanStrictOrNull() ?: false
+            val hidden = parts.getOrNull(2)?.toBooleanStrictOrNull() ?: false
+            return FolderViewPrefs(mode, thumbs, hidden)
+        }
+    }
+
+    fun serialize(): String =
+        "${viewMode.name}|$showThumbnails|$showHiddenFiles"
+}
+
 class ViewModeStore(context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("view_mode_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("view_mode_prefs", Context.MODE_PRIVATE)
 
-    private val _webDavViewMode = MutableStateFlow(loadWebDavMode())
-    val webDavViewMode: StateFlow<ViewMode> = _webDavViewMode.asStateFlow()
+    /** 当前目录的视图偏好（切换目录时由 ViewModel 调用 loadFolder 更新） */
+    private val _currentFolderPrefs = MutableStateFlow(FolderViewPrefs.default())
+    val currentFolderPrefs: StateFlow<FolderViewPrefs> = _currentFolderPrefs.asStateFlow()
 
-    private val _localViewMode = MutableStateFlow(loadLocalMode())
-    val localViewMode: StateFlow<ViewMode> = _localViewMode.asStateFlow()
+    /** 上一次加载的目录 key */
+    private var currentKey: String? = null
 
-    private val _showThumbnailsAndDuration = MutableStateFlow(loadShowThumbnailsAndDuration())
-    val showThumbnailsAndDuration: StateFlow<Boolean> = _showThumbnailsAndDuration.asStateFlow()
-
-    /** 是否显示隐藏文件（以 . 开头的文件/文件夹），默认不显示 */
-    private val _showHiddenFiles = MutableStateFlow(loadShowHiddenFiles())
-    val showHiddenFiles: StateFlow<Boolean> = _showHiddenFiles.asStateFlow()
-
-    private fun loadShowHiddenFiles(): Boolean {
-        return prefs.getBoolean("show_hidden_files", false)
+    /**
+     * 加载指定目录的视图偏好；若该目录未单独设置过，返回默认值。
+     */
+    fun loadFolder(folderKey: String) {
+        currentKey = folderKey
+        _currentFolderPrefs.value = getFolderPrefs(folderKey)
     }
 
-    fun setShowHiddenFiles(show: Boolean) {
-        prefs.edit().putBoolean("show_hidden_files", show).apply()
-        _showHiddenFiles.value = show
+    /**
+     * 获取指定目录保存的视图偏好（不切换当前目录）
+     */
+    fun getFolderPrefs(folderKey: String): FolderViewPrefs {
+        val raw = prefs.getString(key(folderKey), null)
+        return FolderViewPrefs.parse(raw)
     }
 
-    fun toggleShowHiddenFiles() {
-        setShowHiddenFiles(!_showHiddenFiles.value)
-    }
-
-    private fun loadWebDavMode(): ViewMode {
-        val name = prefs.getString("webdav_view_mode", ViewMode.DETAILS.name)
-        return try {
-            ViewMode.valueOf(name ?: ViewMode.DETAILS.name)
-        } catch (_: Exception) {
-            ViewMode.DETAILS
+    /**
+     * 保存指定目录的视图偏好，并刷新当前 flow（若正是当前目录）
+     */
+    fun saveFolderPrefs(folderKey: String, value: FolderViewPrefs) {
+        prefs.edit().putString(key(folderKey), value.serialize()).apply()
+        if (currentKey == folderKey) {
+            _currentFolderPrefs.value = value
         }
     }
 
-    fun setWebDavViewMode(mode: ViewMode) {
-        prefs.edit().putString("webdav_view_mode", mode.name).apply()
-        _webDavViewMode.value = mode
+    /** 修改当前目录的某一项（基于已加载的 prefs） */
+    private fun updateCurrent(transform: (FolderViewPrefs) -> FolderViewPrefs) {
+        val key = currentKey ?: return
+        val updated = transform(_currentFolderPrefs.value)
+        saveFolderPrefs(key, updated)
     }
 
-    private fun loadLocalMode(): ViewMode {
-        val name = prefs.getString("local_view_mode", ViewMode.DETAILS.name)
-        return try {
-            ViewMode.valueOf(name ?: ViewMode.DETAILS.name)
-        } catch (_: Exception) {
-            ViewMode.DETAILS
+    fun setViewMode(mode: ViewMode) =
+        updateCurrent { it.copy(viewMode = mode) }
+
+    fun setShowThumbnails(show: Boolean) =
+        updateCurrent { it.copy(showThumbnails = show) }
+
+    fun toggleShowThumbnails() =
+        updateCurrent { it.copy(showThumbnails = !it.showThumbnails) }
+
+    fun setShowHiddenFiles(show: Boolean) =
+        updateCurrent { it.copy(showHiddenFiles = show) }
+
+    fun toggleShowHiddenFiles() =
+        updateCurrent { it.copy(showHiddenFiles = !it.showHiddenFiles) }
+
+    /**
+     * 清除指定目录的偏好（恢复默认）
+     */
+    fun clearFolder(folderKey: String) {
+        prefs.edit().remove(key(folderKey)).apply()
+        if (currentKey == folderKey) {
+            _currentFolderPrefs.value = FolderViewPrefs.default()
         }
     }
 
-    fun setLocalViewMode(mode: ViewMode) {
-        prefs.edit().putString("local_view_mode", mode.name).apply()
-        _localViewMode.value = mode
-    }
+    private fun key(folderKey: String) = "view_$folderKey"
 
-    private fun loadShowThumbnailsAndDuration(): Boolean {
-        return prefs.getBoolean("show_thumbnails_and_duration", true)
-    }
+    companion object {
+        /** 本地文件夹的键值 */
+        fun buildLocalKey(path: String): String = "local_$path"
 
-    fun setShowThumbnailsAndDuration(show: Boolean) {
-        prefs.edit().putBoolean("show_thumbnails_and_duration", show).apply()
-        _showThumbnailsAndDuration.value = show
+        /** WebDAV 账户 + 路径的键值（隔离不同账户相同路径） */
+        fun buildWebDavKey(accountId: Long, path: String): String {
+            val normalized = if (path.startsWith("/")) path else "/$path"
+            return "webdav_${accountId}_$normalized"
+        }
     }
 }

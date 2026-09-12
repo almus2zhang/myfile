@@ -31,21 +31,29 @@ data class WebDavUiState(
 ) {
     /** 排序后的文件列表：目录始终在前，然后按选定字段排序（隐藏文件可选过滤） */
     val sortedFiles: List<FileEntry>
-        get() {
-            // 不显示隐藏文件时过滤掉以 . 开头的条目
-            val visible = if (showHiddenFiles) files else files.filter { !it.name.startsWith(".") }
-            val dirs = visible.filter { it.isDirectory }
-            val fs = visible.filter { !it.isDirectory }
-            val cmp: Comparator<FileEntry> = when (sortMode) {
-                SortMode.NAME -> compareBy { it.name.lowercase() }
-                SortMode.SIZE -> compareBy { it.size }
-                SortMode.MODIFIED -> compareBy { it.lastModified }
-                SortMode.TYPE -> compareBy<FileEntry> { it.name.substringAfterLast('.', "").lowercase() }
-                    .thenBy { it.name.lowercase() }
-            }
-            val ordered = if (sortAsc) cmp else cmp.reversed()
-            return dirs.sortedWith(ordered) + fs.sortedWith(ordered)
-        }
+        get() = sortEntries(files)
+
+    /**
+     * 对任意条目列表应用当前的隐藏文件过滤 + 排序规则。
+     * 供主列表与搜索结果共用，保证搜索结果的排序行为与主视图一致。
+     */
+    fun sortEntries(source: List<FileEntry>): List<FileEntry> {
+        // 不显示隐藏文件时过滤掉以 . 开头的条目
+        val visible = if (showHiddenFiles) source else source.filter { !it.name.startsWith(".") }
+        val dirs = visible.filter { it.isDirectory }
+        val fs = visible.filter { !it.isDirectory }
+        val cmp = comparator()
+        val ordered = if (sortAsc) cmp else cmp.reversed()
+        return dirs.sortedWith(ordered) + fs.sortedWith(ordered)
+    }
+
+    private fun comparator(): Comparator<FileEntry> = when (sortMode) {
+        SortMode.NAME -> compareBy { it.name.lowercase() }
+        SortMode.SIZE -> compareBy { it.size }
+        SortMode.MODIFIED -> compareBy { it.lastModified }
+        SortMode.TYPE -> compareBy<FileEntry> { it.name.substringAfterLast('.', "").lowercase() }
+            .thenBy { it.name.lowercase() }
+    }
 }
 
 enum class SortMode(val label: String) {
@@ -64,24 +72,57 @@ class WebDavViewModel : ViewModel() {
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
 
-    val viewMode: StateFlow<ViewMode> = viewModeStore.webDavViewMode
+    /** 当前目录的视图偏好（视图/缩略图/隐藏文件/间隔线），按目录路径记忆 */
+    val currentFolderPrefs: StateFlow<com.example.myfile.data.prefs.FolderViewPrefs> =
+        viewModeStore.currentFolderPrefs
 
-    val showThumbnailsAndDuration: StateFlow<Boolean> = viewModeStore.showThumbnailsAndDuration
+    /** 视图模式（来自当前目录偏好） */
+    val viewMode: StateFlow<ViewMode> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.viewMode
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect { flow.value = it.viewMode }
+        }
+    }
+
+    val showThumbnailsAndDuration: StateFlow<Boolean> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.showThumbnails
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect { flow.value = it.showThumbnails }
+        }
+    }
+
+    /** 加载指定账户+路径的视图偏好 */
+    private fun loadFolderPrefs(accId: Long, path: String) {
+        val folderKey = com.example.myfile.data.prefs.ViewModeStore.buildWebDavKey(accId, path)
+        viewModeStore.loadFolder(folderKey)
+    }
 
     fun setViewMode(mode: ViewMode) {
-        viewModeStore.setWebDavViewMode(mode)
+        viewModeStore.setViewMode(mode)
     }
 
     fun setShowThumbnailsAndDuration(show: Boolean) {
-        viewModeStore.setShowThumbnailsAndDuration(show)
+        viewModeStore.setShowThumbnails(show)
     }
 
     fun toggleShowThumbnailsAndDuration() {
-        val current = viewModeStore.showThumbnailsAndDuration.value
-        viewModeStore.setShowThumbnailsAndDuration(!current)
+        viewModeStore.toggleShowThumbnails()
     }
 
-    val showHiddenFilesFlow: StateFlow<Boolean> = viewModeStore.showHiddenFiles
+    val showHiddenFilesFlow: StateFlow<Boolean> = MutableStateFlow(
+        viewModeStore.currentFolderPrefs.value.showHiddenFiles
+    ).also { flow ->
+        viewModelScope.launch {
+            viewModeStore.currentFolderPrefs.collect {
+                flow.value = it.showHiddenFiles
+                if (_state.value.showHiddenFiles != it.showHiddenFiles) {
+                    _state.value = _state.value.copy(showHiddenFiles = it.showHiddenFiles)
+                }
+            }
+        }
+    }
 
     fun setShowHiddenFiles(show: Boolean) {
         viewModeStore.setShowHiddenFiles(show)
@@ -89,15 +130,15 @@ class WebDavViewModel : ViewModel() {
     }
 
     fun toggleShowHiddenFiles() {
-        setShowHiddenFiles(!viewModeStore.showHiddenFiles.value)
+        viewModeStore.toggleShowHiddenFiles()
     }
 
     private val _durationRefreshTrigger = MutableStateFlow(0)
     val durationRefreshTrigger: StateFlow<Int> = _durationRefreshTrigger.asStateFlow()
 
     fun forceRefreshDurations() {
-        if (!viewModeStore.showThumbnailsAndDuration.value) {
-            viewModeStore.setShowThumbnailsAndDuration(true)
+        if (!viewModeStore.currentFolderPrefs.value.showThumbnails) {
+            viewModeStore.setShowThumbnails(true)
         }
         _durationRefreshTrigger.value += 1
     }
@@ -108,15 +149,6 @@ class WebDavViewModel : ViewModel() {
     }
 
     init {
-        // 同步「显示隐藏文件」设置
-        _state.value = _state.value.copy(showHiddenFiles = viewModeStore.showHiddenFiles.value)
-        viewModelScope.launch {
-            viewModeStore.showHiddenFiles.collect { show ->
-                if (_state.value.showHiddenFiles != show) {
-                    _state.value = _state.value.copy(showHiddenFiles = show)
-                }
-            }
-        }
         viewModelScope.launch {
             var initialized = false
             accountStore.accounts.collect { list ->
@@ -124,6 +156,8 @@ class WebDavViewModel : ViewModel() {
                 val prev = _state.value
                 val initialPath = if (cur != null && cur.rememberLastPath) pathStore.getLastPath(cur.id) else "/"
                 val (mode, asc) = if (cur != null) getFolderSort(cur.id, initialPath) else (SortMode.NAME to true)
+                // 加载该目录的视图偏好
+                if (cur != null) loadFolderPrefs(cur.id, initialPath)
                 _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = initialPath, sortMode = mode, sortAsc = asc)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
                 if (!initialized && cur != null) {
@@ -146,6 +180,7 @@ class WebDavViewModel : ViewModel() {
         // 恢复目标账户上次打开的路径（未开启则回到根目录）
         val targetPath = if (account.rememberLastPath) pathStore.getLastPath(account.id) else "/"
         val (mode, asc) = getFolderSort(account.id, targetPath)
+        loadFolderPrefs(account.id, targetPath)
         // 先清空文件列表、停止loading（避免转圈残留），再触发新的刷新
         _state.value = _state.value.copy(
             currentAccount = account,
@@ -168,6 +203,7 @@ class WebDavViewModel : ViewModel() {
             }
             val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, entry.path) }
                 ?: (SortMode.NAME to true)
+            _state.value.currentAccount?.let { loadFolderPrefs(it.id, entry.path) }
             _state.value = _state.value.copy(
                 currentPath = entry.path,
                 sortMode = mode,
@@ -196,6 +232,7 @@ class WebDavViewModel : ViewModel() {
         }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, parent) }
             ?: (SortMode.NAME to true)
+        _state.value.currentAccount?.let { loadFolderPrefs(it.id, parent) }
         _state.value = _state.value.copy(
             currentPath = parent,
             sortMode = mode,
@@ -214,6 +251,7 @@ class WebDavViewModel : ViewModel() {
         }
         val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, normalized) }
             ?: (SortMode.NAME to true)
+        _state.value.currentAccount?.let { loadFolderPrefs(it.id, normalized) }
         _state.value = _state.value.copy(
             currentPath = normalized,
             sortMode = mode,
@@ -415,6 +453,120 @@ class WebDavViewModel : ViewModel() {
                 _state.value = _state.value.copy(loading = false, error = errorMsg)
             }
         }
+    }
+
+    // ---------- WEBDAV 索引搜索 ----------
+
+    /** 是否处于搜索模式（面包屑位置显示搜索框） */
+    private val _searchMode = MutableStateFlow(false)
+    val searchMode: StateFlow<Boolean> = _searchMode.asStateFlow()
+
+    /** 搜索关键词 */
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    /** 搜索结果（复用主视图展示与操作） */
+    private val _searchResults = MutableStateFlow<List<FileEntry>>(emptyList())
+    val searchResults: StateFlow<List<FileEntry>> = _searchResults.asStateFlow()
+
+    /** 搜索加载中 */
+    private val _searchLoading = MutableStateFlow(false)
+    val searchLoading: StateFlow<Boolean> = _searchLoading.asStateFlow()
+
+    /** 索引总条数（用于提示） */
+    private val _indexTotal = MutableStateFlow(0)
+    val indexTotal: StateFlow<Int> = _indexTotal.asStateFlow()
+
+    /**
+     * 从搜索结果进入文件夹时记录的起始路径（非 null 表示当前处于"搜索→文件夹"子导航状态）。
+     * 当回退到此路径时，按返回键将恢复搜索结果而非继续向上导航。
+     */
+    private val _searchEntryPath = MutableStateFlow<String?>(null)
+    val searchEntryPath: StateFlow<String?> = _searchEntryPath.asStateFlow()
+
+    /** 进入搜索模式 */
+    fun enterSearch() {
+        _searchMode.value = true
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+    }
+
+    /** 退出搜索模式，恢复普通列表 */
+    fun exitSearch() {
+        _searchMode.value = false
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _searchLoading.value = false
+        _searchEntryPath.value = null
+    }
+
+    /**
+     * 从搜索结果点击文件夹：切换到该文件夹的普通浏览模式，同时保留搜索关键词和搜索结果，
+     * 以便之后可以通过 [returnToSearch] 恢复搜索列表。
+     */
+    fun openFromSearch(entry: FileEntry) {
+        if (!entry.isDirectory) return
+        _searchEntryPath.value = _state.value.currentPath  // 记录进入前的路径（作为返回锚点）
+        _searchMode.value = false  // 隐藏搜索框，显示面包屑
+        // 保留 _searchQuery 和 _searchResults，不清空
+        _state.value.currentAccount?.let {
+            if (it.rememberLastPath) pathStore.saveLastPath(it.id, entry.path)
+        }
+        val (mode, asc) = _state.value.currentAccount?.let { getFolderSort(it.id, entry.path) }
+            ?: (SortMode.NAME to true)
+        _state.value.currentAccount?.let { loadFolderPrefs(it.id, entry.path) }
+        _state.value = _state.value.copy(
+            currentPath = entry.path,
+            sortMode = mode,
+            sortAsc = asc,
+            selected = emptySet(),
+            multiSelectMode = false
+        )
+        refresh()
+    }
+
+    /**
+     * 从文件夹返回搜索结果：恢复搜索模式，保留之前的搜索关键词和搜索结果。
+     */
+    fun returnToSearch() {
+        _searchEntryPath.value = null
+        _searchMode.value = true
+        // _searchQuery 和 _searchResults 仍然保留，无需重新搜索
+    }
+
+    /** 更新关键词并执行搜索 */
+    fun onSearchQueryChange(q: String) {
+        _searchQuery.value = q
+        val acc = _state.value.currentAccount
+        if (acc == null) return
+        val keywords = com.example.myfile.core.WebDavIndex.parseKeywords(q)
+        viewModelScope.launch {
+            _searchLoading.value = true
+            try {
+                val index = withContext(Dispatchers.IO) {
+                    com.example.myfile.core.WebDavIndex.loadIndex(MyApp.instance.okHttpClient, acc)
+                }
+                _indexTotal.value = index.size
+                val matched = withContext(Dispatchers.Default) {
+                    com.example.myfile.core.WebDavIndex.search(index, keywords)
+                }
+                _searchResults.value = com.example.myfile.core.WebDavIndex.toFileEntries(
+                    matched.take(2000)  // 限制上限，避免超大结果卡顿
+                )
+            } catch (e: Exception) {
+                Log.e("WebDavVM", "search failed", e)
+                _searchResults.value = emptyList()
+            } finally {
+                _searchLoading.value = false
+            }
+        }
+    }
+
+    /** 强制重新加载索引 */
+    fun refreshIndex() {
+        val acc = _state.value.currentAccount ?: return
+        com.example.myfile.core.WebDavIndex.clearCache(acc.id)
+        onSearchQueryChange(_searchQuery.value)
     }
 
     fun saveAccount(account: WebDavAccount) {
