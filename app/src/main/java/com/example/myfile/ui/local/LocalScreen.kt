@@ -850,9 +850,7 @@ fun LocalScreen(
                                         }
                                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                             if (!entry.isDirectory) {
-                                                if (FileOpener.isText(entry.name)) {
-                                                    DropdownMenuItem(text = { Text("编辑文本") }, leadingIcon = { Icon(Icons.Filled.EditNote, null) }, onClick = { showMenu = false; editingTextEntry = entry })
-                                                }
+                                                DropdownMenuItem(text = { Text("当做文本文件打开") }, leadingIcon = { Icon(Icons.Filled.EditNote, null) }, onClick = { showMenu = false; editingTextEntry = entry })
                                                 DropdownMenuItem(text = { Text("打开为…") }, leadingIcon = { Icon(Icons.Filled.OpenInNew, null) }, onClick = { showMenu = false; openEntry(forceChooser = true) })
                                                 DropdownMenuItem(text = { Text("分享") }, leadingIcon = { Icon(Icons.Filled.Share, null) }, onClick = { showMenu = false; com.example.myfile.core.FileSharer.shareFile(context, java.io.File(entry.path)) })
                                             }
@@ -971,9 +969,39 @@ fun LocalScreen(
             onLoad = { onProgress ->
                 withContext(Dispatchers.IO) {
                     val file = File(entry.path)
-                    val text = file.readText(Charsets.UTF_8)
-                    onProgress(file.length(), file.length(), text)
-                    text
+                    val total = file.length()
+                    val maxChars = 2_000_000
+                    if (total > maxChars) {
+                        val reader = file.bufferedReader(Charsets.UTF_8)
+                        val sb = StringBuilder()
+                        val buf = CharArray(16384)
+                        var readChars: Int
+                        var loaded = 0L
+                        var lastReportTime = 0L
+                        try {
+                            while (reader.read(buf).also { readChars = it } != -1) {
+                                sb.append(buf, 0, readChars)
+                                loaded += readChars
+                                val now = System.currentTimeMillis()
+                                if (now - lastReportTime > 100) {
+                                    lastReportTime = now
+                                    onProgress(loaded, total)
+                                }
+                                if (sb.length > maxChars) {
+                                    sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
+                                    break
+                                }
+                            }
+                        } finally {
+                            try { reader.close() } catch (_: Exception) {}
+                        }
+                        onProgress(total, total)
+                        sb.toString()
+                    } else {
+                        val text = file.readText(Charsets.UTF_8)
+                        onProgress(total, total)
+                        text
+                    }
                 }
             },
             onSave = { newText ->

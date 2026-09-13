@@ -1685,16 +1685,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 onDismissRequest = { showMenu = false }
                                             ) {
                                                 if (!entry.isDirectory) {
-                                                    if (FileOpener.isText(entry.name)) {
-                                                        DropdownMenuItem(
-                                                            text = { Text("编辑文本") },
-                                                            leadingIcon = { Icon(Icons.Filled.EditNote, null) },
-                                                            onClick = {
-                                                                showMenu = false
-                                                                editingTextEntry = entry
-                                                            }
-                                                        )
-                                                    }
+                                                    DropdownMenuItem(
+                                                        text = { Text("当做文本文件打开") },
+                                                        leadingIcon = { Icon(Icons.Filled.EditNote, null) },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            editingTextEntry = entry
+                                                        }
+                                                    )
                                                     DropdownMenuItem(
                                                         text = { Text("打开为…") },
                                                         leadingIcon = { Icon(Icons.Filled.OpenInNew, null) },

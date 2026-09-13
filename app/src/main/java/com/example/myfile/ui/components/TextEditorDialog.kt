@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 fun TextEditorDialog(
     fileName: String,
     filePath: String,
-    onLoad: suspend (onProgress: (loadedBytes: Long, totalBytes: Long, partialText: String) -> Unit) -> String,
+    onLoad: suspend (onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit) -> String,
     onSave: (suspend (newText: String) -> Boolean)?,
     onDismiss: () -> Unit
 ) {
@@ -56,7 +56,8 @@ fun TextEditorDialog(
     var loadedBytes by remember { mutableLongStateOf(0L) }
     var totalBytes by remember { mutableLongStateOf(0L) }
     var isWordWrap by remember { mutableStateOf(true) }
-    var isReadOnly by remember { mutableStateOf(false) }
+    var isReadOnly by remember { mutableStateOf(true) } // 默认浏览模式，防大文件弹软键盘卡顿
+    var isTruncated by remember { mutableStateOf(false) }
     var showExitConfirm by remember { mutableStateOf(false) }
 
     val isModified = remember(textValue.text, originalText) {
@@ -69,15 +70,18 @@ fun TextEditorDialog(
         errorMessage = null
         scope.launch {
             try {
-                val full = onLoad { loaded, total, partial ->
+                val full = onLoad { loaded, total ->
                     loadedBytes = loaded
                     totalBytes = total
-                    if (isLoading) {
-                        textValue = TextFieldValue(partial)
-                    }
                 }
                 textValue = TextFieldValue(full)
                 originalText = full
+                val truncated = full.contains("--- [文件过大，已截断显示前 2MB 内容] ---") ||
+                                full.contains("--- [文件过大，已自动截断前 2MB 内容] ---")
+                isTruncated = truncated
+                if (truncated) {
+                    isReadOnly = true
+                }
                 isLoading = false
             } catch (e: Exception) {
                 errorMessage = e.message ?: "读取文件失败"
@@ -93,6 +97,10 @@ fun TextEditorDialog(
     // 保存逻辑
     fun performSave(onSuccess: () -> Unit = {}) {
         if (onSave == null || isSaving) return
+        if (isTruncated) {
+            Toast.makeText(context, "文件已截断显示，禁止保存以防丢失数据", Toast.LENGTH_SHORT).show()
+            return
+        }
         isSaving = true
         scope.launch {
             try {
@@ -153,10 +161,11 @@ fun TextEditorDialog(
                             val lineCount = remember(textValue.text) {
                                 if (textValue.text.isEmpty()) 0 else textValue.text.count { it == '\n' } + 1
                             }
+                            val displaySize = if (totalBytes > 0) totalBytes else textValue.text.length.toLong()
                             Text(
-                                text = "${formatSize(textValue.text.toByteArray().size.toLong())} · $lineCount 行 · UTF-8",
+                                text = "${formatSize(displaySize)} · $lineCount 行 · UTF-8" + if (isTruncated) " (已截断)" else "",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (isTruncated) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     },
@@ -182,11 +191,17 @@ fun TextEditorDialog(
                         }
 
                         // 只读 / 编辑切换
-                        IconButton(onClick = { isReadOnly = !isReadOnly }) {
+                        IconButton(onClick = {
+                            if (isTruncated) {
+                                Toast.makeText(context, "文件过大已截断，仅支持浏览，禁止编辑以防损坏原文件", Toast.LENGTH_SHORT).show()
+                            } else {
+                                isReadOnly = !isReadOnly
+                            }
+                        }) {
                             Icon(
-                                imageVector = if (isReadOnly) Icons.Filled.Visibility else Icons.Filled.Edit,
+                                imageVector = if (isReadOnly) Icons.Filled.Edit else Icons.Filled.Visibility,
                                 contentDescription = if (isReadOnly) "切换到编辑" else "切换到浏览",
-                                tint = if (isReadOnly) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                                tint = if (isReadOnly) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -203,14 +218,15 @@ fun TextEditorDialog(
                                     )
                                 }
                             } else {
+                                val canSave = isModified && !isTruncated
                                 IconButton(
                                     onClick = { performSave() },
-                                    enabled = isModified
+                                    enabled = canSave
                                 ) {
                                     Icon(
                                         Icons.Filled.Save,
                                         contentDescription = "保存",
-                                        tint = if (isModified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                        tint = if (canSave) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                                     )
                                 }
                             }
@@ -280,10 +296,20 @@ fun TextEditorDialog(
                     val verticalScrollState = rememberScrollState()
                     val horizontalScrollState = rememberScrollState()
 
-                    val lines = remember(textValue.text) {
-                        textValue.text.split('\n')
+                    val lineCount = remember(textValue.text) {
+                        if (textValue.text.isEmpty()) 0 else textValue.text.count { it == '\n' } + 1
                     }
-                    val lineCount = lines.size.coerceAtLeast(1)
+
+                    // 单个 Text 高效渲染行号，避免千万个 Compose 节点导致卡死
+                    val lineNumbersText = remember(lineCount) {
+                        val limit = minOf(lineCount, 3000)
+                        buildString(limit * 6) {
+                            for (i in 1..limit) {
+                                append(i).append('\n')
+                            }
+                            if (lineCount > 3000) append("...")
+                        }
+                    }
 
                     Row(
                         modifier = Modifier
@@ -292,28 +318,25 @@ fun TextEditorDialog(
                             .background(MaterialTheme.colorScheme.surface)
                     ) {
                         // 左侧行号栏（与内容垂直同步滚动）
-                        Column(
+                        Box(
                             modifier = Modifier
-                                .width(42.dp)
+                                .width(if (lineCount >= 1000) 48.dp else 38.dp)
                                 .fillMaxHeight()
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                                 .verticalScroll(verticalScrollState)
                                 .padding(vertical = 12.dp, horizontal = 4.dp),
-                            horizontalAlignment = Alignment.End
+                            contentAlignment = Alignment.TopEnd
                         ) {
-                            for (i in 1..lineCount) {
-                                Text(
-                                    text = "$i",
-                                    style = TextStyle(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 13.sp,
-                                        lineHeight = 20.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                        textAlign = TextAlign.End
-                                    ),
-                                    maxLines = 1
+                            Text(
+                                text = lineNumbersText,
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    textAlign = TextAlign.End
                                 )
-                            }
+                            )
                         }
 
                         // 分割线
@@ -339,19 +362,34 @@ fun TextEditorDialog(
                         }
 
                         Box(modifier = editorModifier) {
-                            BasicTextField(
-                                value = textValue,
-                                onValueChange = { if (!isReadOnly) textValue = it },
-                                readOnly = isReadOnly,
-                                textStyle = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (isReadOnly) {
+                                androidx.compose.foundation.text.selection.SelectionContainer {
+                                    Text(
+                                        text = textValue.text,
+                                        style = TextStyle(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            lineHeight = 20.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            } else {
+                                BasicTextField(
+                                    value = textValue,
+                                    onValueChange = { textValue = it },
+                                    readOnly = false,
+                                    textStyle = TextStyle(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 13.sp,
+                                        lineHeight = 20.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
 
@@ -368,9 +406,17 @@ fun TextEditorDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (isReadOnly) "浏览模式 (只读)" else "编辑模式",
+                                text = if (isTruncated) {
+                                    "已截断显示前 2MB (只读，禁止保存)"
+                                } else if (isReadOnly) {
+                                    "浏览模式 (只读，轻触右上角铅笔可编辑)"
+                                } else {
+                                    "编辑模式"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isReadOnly) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                                color = if (isTruncated) MaterialTheme.colorScheme.error
+                                       else if (isReadOnly) MaterialTheme.colorScheme.onSurfaceVariant
+                                       else MaterialTheme.colorScheme.primary
                             )
                             if (isModified) {
                                 Text(

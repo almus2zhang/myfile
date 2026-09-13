@@ -282,7 +282,7 @@ class WebDavViewModel : ViewModel() {
     /** 流式读取文本文件 */
     suspend fun streamDownloadText(
         path: String,
-        onProgress: (loadedBytes: Long, totalBytes: Long, partialText: String) -> Unit
+        onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit
     ): String = withContext(Dispatchers.IO) {
         val acc = _state.value.currentAccount ?: throw IllegalStateException("无有效账户")
         val resp = repo.download(acc, path)
@@ -303,9 +303,9 @@ class WebDavViewModel : ViewModel() {
                 sb.append(buf, 0, readChars)
                 loadedBytes += readChars
                 val now = System.currentTimeMillis()
-                if (now - lastReportTime > 150) {
+                if (now - lastReportTime > 100) {
                     lastReportTime = now
-                    onProgress(loadedBytes, total, sb.toString())
+                    onProgress(loadedBytes, total)
                 }
                 if (sb.length > maxChars) {
                     sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
@@ -313,11 +313,10 @@ class WebDavViewModel : ViewModel() {
                 }
             }
         } finally {
-            body.close()
+            try { body.close() } catch (_: Exception) {}
         }
-        val full = sb.toString()
-        onProgress(loadedBytes, total, full)
-        full
+        onProgress(loadedBytes, total)
+        sb.toString()
     }
 
     /** 保存文本文件到 WebDAV */
