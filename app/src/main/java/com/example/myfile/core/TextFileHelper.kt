@@ -79,10 +79,13 @@ object TextFileHelper {
         return sb.toString()
     }
 
+    /** 单次文本最大安全加载上限（256KB） */
+    const val MAX_TEXT_LOAD_CHARS = 256 * 1024
+
     /**
      * 安全读取数据流：
      * 1. 自动检测二进制。若是二进制，读取前 64KB 生成 Hex 视图。
-     * 2. 若是文本，读取前 2MB，并对长行（单行无换行超 200 字符）安全软折行，防 Android 渲染引擎卡死。
+     * 2. 若是文本，读取前 256KB，并对长行（单行无换行超 200 字符）安全软折行，防 Android 渲染引擎卡死。
      */
     fun readStreamSafely(
         inputStream: InputStream,
@@ -114,16 +117,21 @@ object TextFileHelper {
             return formatHexDump(binaryData, totalBinaryRead, if (totalBytes > 0) totalBytes else totalBinaryRead.toLong())
         }
 
-        // 文本模式：读取前 2MB 内容
+        // 文本模式：读取前 256KB 内容
         val sb = StringBuilder()
         var loadedBytes = 0L
         var lastReportTime = 0L
-        val maxChars = 2_000_000
+        val maxChars = MAX_TEXT_LOAD_CHARS
+        var isTruncated = false
 
         // 辅助将 chunk 添加到 sb，对连续无换行超 200 字符的安全断行
         var lineCharCount = 0
         fun appendSafeChunk(chars: CharArray, count: Int) {
             for (i in 0 until count) {
+                if (sb.length >= maxChars) {
+                    isTruncated = true
+                    break
+                }
                 val c = chars[i]
                 if (c == '\n') {
                     sb.append('\n')
@@ -150,21 +158,27 @@ object TextFileHelper {
         }
 
         // 继续逐块读取
-        val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, Charsets.UTF_8))
-        val buf = CharArray(16384)
-        var readChars: Int
-        while (reader.read(buf).also { readChars = it } != -1) {
-            appendSafeChunk(buf, readChars)
-            loadedBytes += readChars
-            val now = System.currentTimeMillis()
-            if (now - lastReportTime > 100) {
-                lastReportTime = now
-                onProgress(loadedBytes, totalBytes)
+        if (!isTruncated) {
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, Charsets.UTF_8))
+            val buf = CharArray(16384)
+            var readChars: Int
+            while (reader.read(buf).also { readChars = it } != -1) {
+                appendSafeChunk(buf, readChars)
+                loadedBytes += readChars
+                val now = System.currentTimeMillis()
+                if (now - lastReportTime > 100) {
+                    lastReportTime = now
+                    onProgress(loadedBytes, totalBytes)
+                }
+                if (isTruncated || sb.length >= maxChars) {
+                    isTruncated = true
+                    break
+                }
             }
-            if (sb.length > maxChars) {
-                sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
-                break
-            }
+        }
+
+        if (isTruncated) {
+            sb.append("\n\n--- [文件过大，已自动截断前 256KB 内容] ---")
         }
         onProgress(loadedBytes, totalBytes)
         return sb.toString()

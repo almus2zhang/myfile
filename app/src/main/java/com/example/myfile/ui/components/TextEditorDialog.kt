@@ -78,8 +78,7 @@ fun TextEditorDialog(
                 textValue = TextFieldValue(full)
                 originalText = full
                 val hex = full.startsWith("--- [检测到二进制文件")
-                val truncated = hex || full.contains("--- [文件过大，已截断显示前 2MB 内容] ---") ||
-                                full.contains("--- [文件过大，已自动截断前 2MB 内容] ---")
+                val truncated = hex || full.contains("--- [文件过大")
                 isHexPreview = hex
                 isTruncated = truncated
                 if (truncated) {
@@ -423,7 +422,7 @@ fun TextEditorDialog(
                                 text = if (isHexPreview) {
                                     "二进制文件十六进制预览 (只读，禁止编辑与保存)"
                                 } else if (isTruncated) {
-                                    "已截断显示前 2MB (只读，禁止保存)"
+                                    "已截断显示前 256KB (只读，禁止保存)"
                                 } else if (isReadOnly) {
                                     "浏览模式 (只读，轻触右上角铅笔可编辑)"
                                 } else {
