@@ -63,6 +63,9 @@ import com.example.myfile.ui.components.OpenWithDialog
 import com.example.myfile.ui.components.ApkDownloadDialog
 import com.example.myfile.ui.components.AccountUnlockDialog
 import com.example.myfile.ui.components.formatSize
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -176,10 +179,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val searchResults by vm.searchResults.collectAsState()
     val searchLoading by vm.searchLoading.collectAsState()
     val indexTotal by vm.indexTotal.collectAsState()
+    val indexTime by vm.indexTime.collectAsState()
     val indexSyncing by vm.indexSyncing.collectAsState()
     val indexSyncMessage by vm.indexSyncMessage.collectAsState()
     val indexProgress by vm.indexProgress.collectAsState()
     val searchEntryPath by vm.searchEntryPath.collectAsState()
+    val indexTimeFmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+    val indexTimeStr = remember(indexTime) {
+        if (indexTime > 0L) " · 索引时间: ${indexTimeFmt.format(Date(indexTime))}" else ""
+    }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var lastProcessedTrigger by remember { mutableStateOf(0) }
@@ -1156,6 +1164,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     modifier = Modifier.fillMaxWidth().height(3.dp)
                                 )
                             }
+                        } else if (indexTotal > 0 || indexTime > 0L) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 14.dp, end = 14.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (searchQuery.isBlank()) "共 $indexTotal 条索引$indexTimeStr"
+                                           else "检索到 ${searchResults.size} 项 / 共 $indexTotal 条索引$indexTimeStr",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                )
+                            }
                         }
                     }
                 }
@@ -1355,10 +1377,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 Text(
                                     text = if (searchMode) {
                                         if (searchQuery.isBlank()) {
-                                            if (indexTotal > 0) "输入关键词搜索（共 $indexTotal 条索引）"
+                                            if (indexTotal > 0) "输入关键词搜索（共 $indexTotal 条索引$indexTimeStr）"
                                             else "暂无本地索引，点击右上方按钮刷新索引"
                                         } else {
-                                            "未找到匹配的文件（共检索 $indexTotal 条索引）"
+                                            "未找到匹配的文件（共检索 $indexTotal 条索引$indexTimeStr）"
                                         }
                                     } else "此文件夹为空",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2045,6 +2067,37 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
+                            val isRemoteNewer = req.entry.lastModified > 0L && req.entry.lastModified > req.localFile.lastModified()
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "远程文件 (WebDAV):",
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                if (isRemoteNewer) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "更新",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "大小: ${if (req.entry.size > 0) formatSize(req.entry.size) else "未知"}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "时间: $remoteTimeStr",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            Spacer(Modifier.height(8.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(8.dp))
+
                             Text(
                                 text = "本地已存文件 (Downloads/myfile/):",
                                 fontWeight = FontWeight.SemiBold,
@@ -2058,26 +2111,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             )
                             Text(
                                 text = "时间: $localTimeStr",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Spacer(Modifier.height(8.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                            Spacer(Modifier.height(8.dp))
-
-                            Text(
-                                text = "远程文件 (WebDAV):",
-                                fontWeight = FontWeight.SemiBold,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = "大小: ${if (req.entry.size > 0) formatSize(req.entry.size) else "未知"}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "时间: $remoteTimeStr",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }

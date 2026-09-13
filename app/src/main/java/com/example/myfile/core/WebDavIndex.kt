@@ -48,7 +48,8 @@ object WebDavIndex {
         val lastModified: String = "",
         val contentLength: Long = 0L,
         val totalCount: Int = 0,
-        val lastSyncTime: Long = 0L
+        val lastSyncTime: Long = 0L,
+        val indexTime: Long = 0L
     )
 
     data class IndexProgress(
@@ -129,7 +130,8 @@ object WebDavIndex {
                 lastModified = json.optString("lastModified", ""),
                 contentLength = json.optLong("contentLength", 0L),
                 totalCount = json.optInt("totalCount", 0),
-                lastSyncTime = json.optLong("lastSyncTime", 0L)
+                lastSyncTime = json.optLong("lastSyncTime", 0L),
+                indexTime = json.optLong("indexTime", 0L)
             )
         } catch (e: Exception) {
             Log.w(TAG, "read meta failed", e)
@@ -145,11 +147,53 @@ object WebDavIndex {
                 put("contentLength", meta.contentLength)
                 put("totalCount", meta.totalCount)
                 put("lastSyncTime", meta.lastSyncTime)
+                put("indexTime", meta.indexTime)
             }
             getMetaFile(account).writeText(json.toString())
         } catch (e: Exception) {
             Log.w(TAG, "save meta failed", e)
         }
+    }
+
+    private val HTTP_DATE_PATTERNS = arrayOf(
+        "EEE, dd MMM yyyy HH:mm:ss zzz",
+        "EEEE, dd-MMM-yy HH:mm:ss zzz",
+        "EEE MMM d HH:mm:ss yyyy",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss"
+    )
+
+    fun parseHttpDate(str: String?): Long {
+        if (str.isNullOrBlank()) return 0L
+        for (pattern in HTTP_DATE_PATTERNS) {
+            try {
+                val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("GMT")
+                }
+                val d = sdf.parse(str)
+                if (d != null) return d.time
+            } catch (_: Exception) {}
+        }
+        return 0L
+    }
+
+    /**
+     * 获取指定账户的索引时间戳（毫秒）
+     */
+    fun getIndexTime(accountId: Long): Long {
+        val meta = loadMetadata(accountId)
+        if (meta.indexTime > 0L) return meta.indexTime
+        if (meta.lastModified.isNotBlank()) {
+            val parsed = parseHttpDate(meta.lastModified)
+            if (parsed > 0L) return parsed
+        }
+        if (meta.lastSyncTime > 0L) return meta.lastSyncTime
+        val f = getIndexFile(accountId)
+        if (f.exists() && f.length() > 0) {
+            return f.lastModified()
+        }
+        return 0L
     }
 
     /**
@@ -377,6 +421,30 @@ object WebDavIndex {
             if (localFile.exists()) localFile.delete()
             tmpFile.renameTo(localFile)
 
+            var jsonTime = 0L
+            try {
+                val trimmed = text.trimStart()
+                if (!trimmed.startsWith("[")) {
+                    val rootObj = JSONObject(trimmed)
+                    val candidate = rootObj.optLong("time", 0L).takeIf { it > 0 }
+                        ?: rootObj.optLong("timestamp", 0L).takeIf { it > 0 }
+                        ?: rootObj.optLong("index_time", 0L).takeIf { it > 0 }
+                        ?: rootObj.optLong("generated_at", 0L).takeIf { it > 0 }
+                        ?: rootObj.optLong("mtime", 0L).takeIf { it > 0 }
+                        ?: 0L
+                    if (candidate > 0L) {
+                        jsonTime = if (candidate < 10000000000L) candidate * 1000L else candidate
+                    }
+                }
+            } catch (_: Exception) {}
+
+            val parsedModTime = parseHttpDate(newLastMod)
+            val actualIndexTime = when {
+                jsonTime > 0L -> jsonTime
+                parsedModTime > 0L -> parsedModTime
+                else -> System.currentTimeMillis()
+            }
+
             // 更新元数据
             saveMetadata(
                 account,
@@ -385,7 +453,8 @@ object WebDavIndex {
                     lastModified = newLastMod,
                     contentLength = if (totalBytes > 0) totalBytes else localFile.length(),
                     totalCount = parsed.size,
-                    lastSyncTime = System.currentTimeMillis()
+                    lastSyncTime = System.currentTimeMillis(),
+                    indexTime = actualIndexTime
                 )
             )
 

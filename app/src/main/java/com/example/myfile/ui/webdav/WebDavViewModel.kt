@@ -180,6 +180,7 @@ class WebDavViewModel : ViewModel() {
         com.example.myfile.core.WebDavIndex.warmupFromDisk(account.id)?.let {
             _indexTotal.value = it.size
         }
+        _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(account.id)
         // 若开启了自动下载且配置了索引路径，在后台自动检查更新
         if (account.autoDownloadIndex && account.indexPath.isNotBlank()) {
             syncIndex(account, forceRefresh = false)
@@ -471,6 +472,10 @@ class WebDavViewModel : ViewModel() {
     private val _indexTotal = MutableStateFlow(0)
     val indexTotal: StateFlow<Int> = _indexTotal.asStateFlow()
 
+    /** 索引生成/同步时间（毫秒时间戳） */
+    private val _indexTime = MutableStateFlow(0L)
+    val indexTime: StateFlow<Long> = _indexTime.asStateFlow()
+
     /** 索引同步状态消息（如“正在下载索引文件 (1.2 MB)...”或“检查服务器更新...”） */
     private val _indexSyncMessage = MutableStateFlow<String?>(null)
     val indexSyncMessage: StateFlow<String?> = _indexSyncMessage.asStateFlow()
@@ -508,6 +513,7 @@ class WebDavViewModel : ViewModel() {
             // 本地完全没有索引，且配置了索引路径，按需触发一次同步
             syncIndex(acc, forceRefresh = false)
         }
+        _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(acc.id)
     }
 
     /** 退出搜索模式，恢复普通列表 */
@@ -546,10 +552,12 @@ class WebDavViewModel : ViewModel() {
                 when (result) {
                     is com.example.myfile.core.WebDavIndex.SyncResult.UpToDate -> {
                         _indexTotal.value = result.count
+                        _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(account.id)
                         _indexSyncMessage.value = "索引已是最新 (共 ${result.count} 条)"
                     }
                     is com.example.myfile.core.WebDavIndex.SyncResult.Downloaded -> {
                         _indexTotal.value = result.count
+                        _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(account.id)
                         _indexSyncMessage.value = "索引下载成功 (共 ${result.count} 条)"
                     }
                     is com.example.myfile.core.WebDavIndex.SyncResult.Error -> {
