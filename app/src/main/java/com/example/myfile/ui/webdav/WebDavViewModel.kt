@@ -280,11 +280,12 @@ class WebDavViewModel : ViewModel() {
         refresh()
     }
 
-    /** 流式读取文本文件（支持二进制 Hex 安全预览与长行折行防卡死） */
+    /** 流式读取文本文件（支持编码自适应/指定、二进制 Hex 安全预览与长行折行防卡死） */
     suspend fun streamDownloadText(
         path: String,
+        charset: String? = null,
         onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit
-    ): String = withContext(Dispatchers.IO) {
+    ): com.example.myfile.core.TextFileHelper.TextLoadResult = withContext(Dispatchers.IO) {
         val acc = _state.value.currentAccount ?: throw IllegalStateException("无有效账户")
         val resp = repo.download(acc, path)
         if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}: ${resp.message}")
@@ -292,16 +293,17 @@ class WebDavViewModel : ViewModel() {
         val total = body.contentLength()
         val inputStream = body.byteStream()
         try {
-            com.example.myfile.core.TextFileHelper.readStreamSafely(inputStream, total, onProgress)
+            com.example.myfile.core.TextFileHelper.readStreamSafely(inputStream, total, charset, onProgress)
         } finally {
             try { body.close() } catch (_: Exception) {}
         }
     }
 
-    /** 保存文本文件到 WebDAV */
-    suspend fun saveText(path: String, content: String): Boolean = withContext(Dispatchers.IO) {
+    /** 保存文本文件到 WebDAV，支持指定编码 */
+    suspend fun saveText(path: String, content: String, charset: String = "UTF-8"): Boolean = withContext(Dispatchers.IO) {
         val acc = _state.value.currentAccount ?: return@withContext false
-        repo.upload(acc, path, content.toByteArray(Charsets.UTF_8))
+        val cs = try { java.nio.charset.Charset.forName(charset) } catch (_: Exception) { Charsets.UTF_8 }
+        repo.upload(acc, path, content.toByteArray(cs))
     }
 
     fun toggleSelect(path: String) {

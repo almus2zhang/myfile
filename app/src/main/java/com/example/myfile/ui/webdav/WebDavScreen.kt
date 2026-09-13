@@ -2223,11 +2223,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         TextEditorDialog(
             fileName = entry.name,
             filePath = entry.path,
-            onLoad = { onProgress ->
-                vm.streamDownloadText(entry.path, onProgress)
+            onLoad = { charset, onProgress ->
+                vm.streamDownloadText(entry.path, charset, onProgress)
             },
-            onSave = { newText ->
-                vm.saveText(entry.path, newText)
+            onSave = { newText, charset ->
+                vm.saveText(entry.path, newText, charset)
             },
             onDismiss = { editingTextEntry = null }
         )

@@ -82,16 +82,116 @@ object TextFileHelper {
     /** 单次文本最大安全加载上限（256KB） */
     const val MAX_TEXT_LOAD_CHARS = 256 * 1024
 
+    /** 文本读取结果封装 */
+    data class TextLoadResult(
+        val content: String,
+        val charsetName: String,
+        val isBinary: Boolean = false,
+        val isTruncated: Boolean = false
+    )
+
+    /** 编码选项 */
+    data class EncodingOption(
+        val name: String,
+        val displayName: String
+    )
+
+    /** 支持的常用编码列表 */
+    val COMMON_ENCODINGS: List<EncodingOption> = listOf(
+        EncodingOption("UTF-8", "UTF-8 (推荐)"),
+        EncodingOption("GB18030", "GB18030 (中文/GBK/GB2312)"),
+        EncodingOption("GBK", "GBK (简体中文)"),
+        EncodingOption("Big5", "Big5 (繁体中文)"),
+        EncodingOption("UTF-16LE", "UTF-16 LE (Unicode)"),
+        EncodingOption("UTF-16BE", "UTF-16 BE (Unicode)"),
+        EncodingOption("windows-1252", "Windows-1252 (ANSI 西欧)"),
+        EncodingOption("ISO-8859-1", "ISO-8859-1 (Latin-1)"),
+        EncodingOption("US-ASCII", "US-ASCII (纯英文)")
+    ).filter {
+        try { java.nio.charset.Charset.isSupported(it.name) } catch (_: Exception) { false }
+    }
+
     /**
-     * 安全读取数据流：
-     * 1. 自动检测二进制。若是二进制，读取前 64KB 生成 Hex 视图。
-     * 2. 若是文本，读取前 256KB，并对长行（单行无换行超 200 字符）安全软折行，防 Android 渲染引擎卡死。
+     * 校验字节数组是否符合某种编码的解码规则
+     */
+    fun isValidCharset(charset: java.nio.charset.Charset, bytes: ByteArray, length: Int): Boolean {
+        if (length <= 0) return true
+        return try {
+            val decoder = charset.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            val byteBuf = java.nio.ByteBuffer.wrap(bytes, 0, length)
+            val charBuf = java.nio.CharBuffer.allocate(length)
+            val result = decoder.decode(byteBuf, charBuf, true)
+            !result.isError
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 自动探测文本字节流的编码：
+     * 1. 优先根据 BOM 识别 UTF-8 / UTF-16LE / UTF-16BE
+     * 2. 无 BOM 时，严格检验 UTF-8 编码结构
+     * 3. 若 UTF-8 校验失败，检验 GB18030 / GBK（中文 Windows 常见编码）
+     * 4. 若仍不匹配，检验 Big5（繁体中文）
+     * 5. 默认回退为 UTF-8
+     */
+    fun detectEncoding(bytes: ByteArray, length: Int): Pair<String, Int> {
+        if (length >= 3 &&
+            (bytes[0].toInt() and 0xFF) == 0xEF &&
+            (bytes[1].toInt() and 0xFF) == 0xBB &&
+            (bytes[2].toInt() and 0xFF) == 0xBF
+        ) {
+            return Pair("UTF-8", 3)
+        }
+        if (length >= 2 &&
+            (bytes[0].toInt() and 0xFF) == 0xFF &&
+            (bytes[1].toInt() and 0xFF) == 0xFE
+        ) {
+            return Pair("UTF-16LE", 2)
+        }
+        if (length >= 2 &&
+            (bytes[0].toInt() and 0xFF) == 0xFE &&
+            (bytes[1].toInt() and 0xFF) == 0xFF
+        ) {
+            return Pair("UTF-16BE", 2)
+        }
+
+        // 优先严格校验 UTF-8
+        if (isValidCharset(Charsets.UTF_8, bytes, length)) {
+            return Pair("UTF-8", 0)
+        }
+
+        // 校验 GB18030 (向下完全兼容 GBK 与 GB2312)
+        try {
+            val gbk = java.nio.charset.Charset.forName("GB18030")
+            if (isValidCharset(gbk, bytes, length)) {
+                return Pair("GB18030", 0)
+            }
+        } catch (_: Exception) {}
+
+        // 校验 Big5
+        try {
+            val big5 = java.nio.charset.Charset.forName("Big5")
+            if (isValidCharset(big5, bytes, length)) {
+                return Pair("Big5", 0)
+            }
+        } catch (_: Exception) {}
+
+        return Pair("UTF-8", 0)
+    }
+
+    /**
+     * 安全流式读取数据：支持常用字符集编码（自动探测或用户指定编码），
+     * 限制单次最大读取 256KB 并在必要时软换行防止 Android Minikin 排版卡死。
      */
     fun readStreamSafely(
         inputStream: InputStream,
         totalBytes: Long,
+        requestedCharset: String? = null,
         onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit
-    ): String {
+    ): TextLoadResult {
         val initialBuffer = ByteArray(8192)
         var initialRead = 0
         while (initialRead < initialBuffer.size) {
@@ -114,7 +214,35 @@ object TextFileHelper {
                 onProgress(totalBinaryRead.toLong(), totalBytes)
             }
             onProgress(totalBinaryRead.toLong(), totalBytes)
-            return formatHexDump(binaryData, totalBinaryRead, if (totalBytes > 0) totalBytes else totalBinaryRead.toLong())
+            return TextLoadResult(
+                content = formatHexDump(binaryData, totalBinaryRead, if (totalBytes > 0) totalBytes else totalBinaryRead.toLong()),
+                charsetName = "Binary",
+                isBinary = true,
+                isTruncated = totalBytes > totalBinaryRead
+            )
+        }
+
+        // 确定使用的编码
+        val (resolvedCharsetName, bomSkip) = if (requestedCharset.isNullOrBlank()) {
+            detectEncoding(initialBuffer, initialRead)
+        } else {
+            val skip = when {
+                requestedCharset.equals("UTF-8", ignoreCase = true) && initialRead >= 3 &&
+                    (initialBuffer[0].toInt() and 0xFF) == 0xEF &&
+                    (initialBuffer[1].toInt() and 0xFF) == 0xBB &&
+                    (initialBuffer[2].toInt() and 0xFF) == 0xBF -> 3
+                requestedCharset.startsWith("UTF-16", ignoreCase = true) && initialRead >= 2 &&
+                    (((initialBuffer[0].toInt() and 0xFF) == 0xFF && (initialBuffer[1].toInt() and 0xFF) == 0xFE) ||
+                     ((initialBuffer[0].toInt() and 0xFF) == 0xFE && (initialBuffer[1].toInt() and 0xFF) == 0xFF)) -> 2
+                else -> 0
+            }
+            Pair(requestedCharset, skip)
+        }
+
+        val targetCharset = try {
+            java.nio.charset.Charset.forName(resolvedCharsetName)
+        } catch (_: Exception) {
+            Charsets.UTF_8
         }
 
         // 文本模式：读取前 256KB 内容
@@ -149,17 +277,19 @@ object TextFileHelper {
             }
         }
 
-        // 处理第一个 buffer
-        if (initialRead > 0) {
-            val firstText = String(initialBuffer, 0, initialRead, Charsets.UTF_8)
+        // 处理第一个 buffer（跳过可能存在的 BOM）
+        val actualInitialOffset = bomSkip
+        val actualInitialLen = maxOf(0, initialRead - actualInitialOffset)
+        if (actualInitialLen > 0) {
+            val firstText = String(initialBuffer, actualInitialOffset, actualInitialLen, targetCharset)
             val chars = firstText.toCharArray()
             appendSafeChunk(chars, chars.size)
             loadedBytes += initialRead
         }
 
-        // 继续逐块读取
+        // 继续逐块读取剩余流
         if (!isTruncated) {
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, Charsets.UTF_8))
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, targetCharset))
             val buf = CharArray(16384)
             var readChars: Int
             while (reader.read(buf).also { readChars = it } != -1) {
@@ -181,6 +311,20 @@ object TextFileHelper {
             sb.append("\n\n--- [文件过大，已自动截断前 256KB 内容] ---")
         }
         onProgress(loadedBytes, totalBytes)
-        return sb.toString()
+        return TextLoadResult(
+            content = sb.toString(),
+            charsetName = resolvedCharsetName,
+            isBinary = false,
+            isTruncated = isTruncated
+        )
+    }
+
+    /** 兼容旧版调用的重载方法 */
+    fun readStreamSafely(
+        inputStream: InputStream,
+        totalBytes: Long,
+        onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit
+    ): String {
+        return readStreamSafely(inputStream, totalBytes, null, onProgress).content
     }
 }

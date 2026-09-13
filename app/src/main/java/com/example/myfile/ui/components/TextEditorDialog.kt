@@ -16,8 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,8 +43,8 @@ import kotlinx.coroutines.launch
 fun TextEditorDialog(
     fileName: String,
     filePath: String,
-    onLoad: suspend (onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit) -> String,
-    onSave: (suspend (newText: String) -> Boolean)?,
+    onLoad: suspend (charset: String?, onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit) -> com.example.myfile.core.TextFileHelper.TextLoadResult,
+    onSave: (suspend (newText: String, charset: String) -> Boolean)?,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -59,6 +61,9 @@ fun TextEditorDialog(
     var isReadOnly by remember { mutableStateOf(true) } // 默认浏览模式，防大文件弹软键盘卡顿
     var isTruncated by remember { mutableStateOf(false) }
     var isHexPreview by remember { mutableStateOf(false) }
+    var currentCharsetName by remember { mutableStateOf("UTF-8") }
+    var showEncodingMenu by remember { mutableStateOf(false) }
+    var pendingEncodingSwitch by remember { mutableStateOf<String?>(null) }
     var showExitConfirm by remember { mutableStateOf(false) }
 
     val isModified = remember(textValue.text, originalText) {
@@ -66,22 +71,21 @@ fun TextEditorDialog(
     }
 
     // 启动流式读取
-    fun startLoading() {
+    fun startLoading(charset: String? = null) {
         isLoading = true
         errorMessage = null
         scope.launch {
             try {
-                val full = onLoad { loaded, total ->
+                val result = onLoad(charset) { loaded, total ->
                     loadedBytes = loaded
                     totalBytes = total
                 }
-                textValue = TextFieldValue(full)
-                originalText = full
-                val hex = full.startsWith("--- [检测到二进制文件")
-                val truncated = hex || full.contains("--- [文件过大")
-                isHexPreview = hex
-                isTruncated = truncated
-                if (truncated) {
+                textValue = TextFieldValue(result.content)
+                originalText = result.content
+                currentCharsetName = result.charsetName
+                isHexPreview = result.isBinary
+                isTruncated = result.isTruncated
+                if (result.isTruncated || result.isBinary) {
                     isReadOnly = true
                 }
                 isLoading = false
@@ -110,10 +114,10 @@ fun TextEditorDialog(
         isSaving = true
         scope.launch {
             try {
-                val success = onSave(textValue.text)
+                val success = onSave(textValue.text, currentCharsetName)
                 if (success) {
                     originalText = textValue.text
-                    Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "已保存 ($currentCharsetName)", Toast.LENGTH_SHORT).show()
                     onSuccess()
                 } else {
                     Toast.makeText(context, "保存失败，请检查网络或权限", Toast.LENGTH_SHORT).show()
@@ -171,7 +175,7 @@ fun TextEditorDialog(
                             val subTitle = if (isHexPreview) {
                                 "${formatSize(displaySize)} · 十六进制 Hex 预览 (只读)"
                             } else {
-                                "${formatSize(displaySize)} · $lineCount 行 · UTF-8" + if (isTruncated) " (已截断)" else ""
+                                "${formatSize(displaySize)} · $lineCount 行 · $currentCharsetName" + if (isTruncated) " (已截断)" else ""
                             }
                             Text(
                                 text = subTitle,
@@ -192,6 +196,74 @@ fun TextEditorDialog(
                         }
                     },
                     actions = {
+                        // 编码选择切换（仅在文本模式下可用）
+                        if (!isHexPreview) {
+                            Box {
+                                Surface(
+                                    onClick = { showEncodingMenu = true },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = currentCharsetName,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        Spacer(Modifier.width(2.dp))
+                                        Icon(
+                                            Icons.Filled.ArrowDropDown,
+                                            contentDescription = "选择编码",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = showEncodingMenu,
+                                    onDismissRequest = { showEncodingMenu = false }
+                                ) {
+                                    com.example.myfile.core.TextFileHelper.COMMON_ENCODINGS.forEach { enc ->
+                                        val isSelected = enc.name.equals(currentCharsetName, ignoreCase = true)
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = enc.displayName,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            },
+                                            leadingIcon = if (isSelected) {
+                                                {
+                                                    Icon(
+                                                        Icons.Filled.Check,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            } else null,
+                                            onClick = {
+                                                showEncodingMenu = false
+                                                if (!isSelected) {
+                                                    if (isModified) {
+                                                        pendingEncodingSwitch = enc.name
+                                                    } else {
+                                                        currentCharsetName = enc.name
+                                                        startLoading(enc.name)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // 自动换行切换
                         IconButton(onClick = { isWordWrap = !isWordWrap }) {
                             Icon(
@@ -422,11 +494,11 @@ fun TextEditorDialog(
                                 text = if (isHexPreview) {
                                     "二进制文件十六进制预览 (只读，禁止编辑与保存)"
                                 } else if (isTruncated) {
-                                    "已截断显示前 256KB (只读，禁止保存)"
+                                    "已截断显示前 256KB · $currentCharsetName (只读，禁止保存)"
                                 } else if (isReadOnly) {
-                                    "浏览模式 (只读，轻触右上角铅笔可编辑)"
+                                    "浏览模式 · $currentCharsetName (只读，轻触右上角铅笔可编辑)"
                                 } else {
-                                    "编辑模式"
+                                    "编辑模式 · $currentCharsetName"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (isHexPreview || isTruncated) MaterialTheme.colorScheme.error
@@ -445,6 +517,30 @@ fun TextEditorDialog(
                 }
             }
         }
+    }
+
+    // 切换编码未保存二次确认弹窗
+    pendingEncodingSwitch?.let { targetCharset ->
+        AlertDialog(
+            onDismissRequest = { pendingEncodingSwitch = null },
+            title = { Text("切换编码重新加载") },
+            text = { Text("当前内容已做修改，以「$targetCharset」重新加载将放弃未保存的修改。\n\n是否确认重新加载？") },
+            confirmButton = {
+                Button(onClick = {
+                    val target = targetCharset
+                    pendingEncodingSwitch = null
+                    currentCharsetName = target
+                    startLoading(target)
+                }) {
+                    Text("放弃修改并重新加载")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingEncodingSwitch = null }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     // 退出未保存二次确认弹窗

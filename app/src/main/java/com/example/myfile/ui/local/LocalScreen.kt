@@ -966,19 +966,20 @@ fun LocalScreen(
         TextEditorDialog(
             fileName = entry.name,
             filePath = entry.path,
-            onLoad = { onProgress ->
+            onLoad = { charset, onProgress ->
                 withContext(Dispatchers.IO) {
                     val file = File(entry.path)
                     val total = file.length()
                     file.inputStream().use { stream ->
-                        com.example.myfile.core.TextFileHelper.readStreamSafely(stream, total, onProgress)
+                        com.example.myfile.core.TextFileHelper.readStreamSafely(stream, total, charset, onProgress)
                     }
                 }
             },
-            onSave = { newText ->
+            onSave = { newText, charset ->
                 withContext(Dispatchers.IO) {
                     try {
-                        File(entry.path).writeText(newText, Charsets.UTF_8)
+                        val cs = try { java.nio.charset.Charset.forName(charset) } catch (_: Exception) { Charsets.UTF_8 }
+                        File(entry.path).writeText(newText, cs)
                         vm.refresh()
                         true
                     } catch (_: Exception) {
