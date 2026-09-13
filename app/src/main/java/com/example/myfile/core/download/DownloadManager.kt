@@ -107,7 +107,8 @@ class DownloadManager(
         fileName: String,
         localDir: File,
         knownSize: Long = -1L,
-        forceRename: Boolean = false
+        forceRename: Boolean = false,
+        disableRename: Boolean = false
     ): Long = withContext(Dispatchers.IO) {
         val client = clientProvider(account)
         // 优先用已知大小（列目录时 PROPFIND Depth:1 已拿到 getcontentlength），否则回退 HEAD/PROPFIND
@@ -125,7 +126,7 @@ class DownloadManager(
         val ext = fileName.substringAfterLast('.', "").lowercase()
         // 只有文件大小达到该账户配置的阈值才改名（forceRename 为手动强制，不受阈值限制）
         val meetsThreshold = forceRename || totalBytes >= account.renameThresholdBytes.coerceAtLeast(0)
-        val shouldRename = meetsThreshold && (forceRename || account.renameToVideoExt) && ext != "avi"
+        val shouldRename = !disableRename && meetsThreshold && (forceRename || account.renameToVideoExt) && ext != "avi"
         if (account.renameToVideoExt && ext != "avi" && !meetsThreshold) {
             DownloadLog.log(
                 TAG,

@@ -30,8 +30,10 @@ import java.util.Locale
 fun ApkDownloadDialog(
     taskId: Long,
     fileName: String,
+    isAccelerated: Boolean = true,
     onDismissRequest: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onComplete: ((File) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val taskFlow = remember(taskId) {
@@ -67,7 +69,9 @@ fun ApkDownloadDialog(
             hasHandledCompletion = true
             val file = File(currentTask.localPath)
             if (file.exists()) {
-                if (fileName.endsWith(".apk", ignoreCase = true)) {
+                if (onComplete != null) {
+                    onComplete(file)
+                } else if (fileName.endsWith(".apk", ignoreCase = true)) {
                     Toast.makeText(context, "下载完成，正在调起安装器...", Toast.LENGTH_SHORT).show()
                     ApkInstaller.install(context, file)
                 } else {
@@ -96,7 +100,11 @@ fun ApkDownloadDialog(
                     .padding(20.dp)
             ) {
                 val isApk = fileName.endsWith(".apk", ignoreCase = true)
-                val titleText = if (isApk) "加速下载安装包" else "加速下载文件"
+                val titleText = if (isAccelerated) {
+                    if (isApk) "加速下载安装包" else "加速下载文件"
+                } else {
+                    if (isApk) "下载安装包" else "下载文件"
+                }
                 val headerIcon = if (isApk) Icons.Filled.Android else Icons.Filled.Download
                 val headerBg = if (isApk) Color(0xFF43A047).copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 val headerTint = if (isApk) Color(0xFF43A047) else MaterialTheme.colorScheme.primary
@@ -141,8 +149,8 @@ fun ApkDownloadDialog(
 
                 Spacer(Modifier.height(16.dp))
 
-                // 伪装加速标签
-                if (settings.renameToVideoExt) {
+                // 伪装加速标签（仅在加速下载且开启改名时展示）
+                if (isAccelerated && settings.renameToVideoExt) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),

@@ -82,6 +82,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     var showSortMenu by remember { mutableStateOf(false) }
     var downloadingApkTaskId by remember { mutableStateOf<Long?>(null) }
     var downloadingApkFileName by remember { mutableStateOf("") }
+    var downloadingIsAccelerated by remember { mutableStateOf(true) }
+    var downloadingOnComplete by remember { mutableStateOf<((java.io.File) -> Unit)?>(null) }
     var pendingUnlockAccount by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     var pendingUnlockForEdit by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     // 三点菜单及 Dialog
@@ -1445,169 +1447,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 val posMs = if (shouldLoadMedia) vProg?.positionMs else null
 
                                 // 打开文件逻辑
-                                fun openEntry(forceChooser: Boolean, bypassExistingCheck: Boolean = false) {
-                                    if (acc == null) return
-                                    scope.launch {
-                                        val appCtx = context.applicationContext
-                                        val isVid = FileOpener.isVideo(entry.name)
-                                        com.example.myfile.core.TrafficMonitor.debug("openEntry: ${entry.name}, isVid=$isVid, cat=$category, force=$forceChooser")
-                                        val fakeAvi = acc.streamFakeAvi
-                                        val ext = entry.name.substringAfterLast('.', "").lowercase()
-
-                                        val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
-                                            MyApp.instance.downloadManager.startStreamingRename(acc, entry.path) ?: entry.path
-                                        } else {
-                                            entry.path
-                                        }
-
-                                        var intent = if (isVid) {
-                                            FileOpener.buildVideoStreamIntent(
-                                                client = com.example.myfile.MyApp.instance.okHttpClient,
-                                                account = acc,
-                                                remotePath = streamRemotePath,
-                                                fileName = entry.name,
-                                                fakeAvi = fakeAvi,
-                                                originalPath = entry.path
-                                            )
-                                        } else {
-                                            val dir = File(
-                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                                                "myfile"
-                                            )
-                                            val downloadedFile = File(dir, entry.name)
-                                            if (!bypassExistingCheck && downloadedFile.exists()) {
-                                                existingFileRequest = ExistingFileRequest(
-                                                    entry = entry,
-                                                    localFile = downloadedFile,
-                                                    isApk = category == "apk",
-                                                    onReDownload = {
-                                                        scope.launch {
-                                                            try { downloadedFile.delete() } catch (_: Exception) {}
-                                                            openEntry(forceChooser = forceChooser, bypassExistingCheck = true)
-                                                        }
-                                                    },
-                                                    onUseLocal = {
-                                                        if (category == "apk") {
-                                                            ApkInstaller.install(context, downloadedFile)
-                                                        } else {
-                                                            openEntry(forceChooser = forceChooser, bypassExistingCheck = true)
-                                                        }
-                                                    }
-                                                )
-                                                return@launch
-                                            }
-
-                                            val fileToOpen = if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
-                                                downloadedFile
-                                            } else {
-                                                Toast.makeText(context, "正在下载 ${entry.name}...", Toast.LENGTH_SHORT).show()
-                                                val downloaded = FileOpener.downloadToCache(
-                                                     client = com.example.myfile.MyApp.instance.okHttpClient,
-                                                     authHeader = auth ?: "",
-                                                     url = fullUrl,
-                                                     fileName = entry.name
-                                                )
-                                                if (downloaded == null) {
-                                                    Toast.makeText(context, "下载失败，请检查网络", Toast.LENGTH_SHORT).show()
-                                                    return@launch
-                                                }
-                                                downloaded
-                                            }
-                                            if (category == "apk") {
-                                                ApkInstaller.install(context, fileToOpen)
-                                                return@launch
-                                            }
-                                            FileOpener.buildLocalViewIntent(appCtx, fileToOpen)
-                                        }
-                                        if (intent == null) {
-                                            if (isVid && fakeAvi && streamRemotePath != entry.path) {
-                                                MyApp.instance.downloadManager.finishStreamingRename(entry.path)
-                                            }
-                                            return@launch
-                                        }
-
-                                        var candidates = FileOpener.resolveCandidates(appCtx, intent)
-                                        if (candidates.isEmpty() && isVid) {
-                                            if (fakeAvi && streamRemotePath != entry.path) {
-                                                MyApp.instance.downloadManager.finishStreamingRename(entry.path)
-                                            }
-                                            val tmp = FileOpener.downloadToCache(
-                                                client = com.example.myfile.MyApp.instance.okHttpClient,
-                                                authHeader = auth ?: "",
-                                                url = fullUrl,
-                                                fileName = entry.name
-                                            )
-                                            if (tmp != null) {
-                                                FileOpener.buildLocalViewIntent(appCtx, tmp)?.let {
-                                                    intent = it
-                                                    candidates = FileOpener.resolveCandidates(appCtx, it)
-                                                }
-                                            }
-                                        }
-
-                                        val finalIntent = intent ?: return@launch
-                                        val finalCandidates = candidates
-
-                                        if (category == "video") {
-                                            val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
-                                            if (saved != null && saved.positionMs > 1000L) {
-                                                finalIntent.putExtra("position", saved.positionMs.toInt())
-                                                finalIntent.putExtra("position_ms", saved.positionMs)
-                                                finalIntent.putExtra("extra_position", saved.positionMs)
-                                                finalIntent.putExtra("time", (saved.positionMs / 1000).toInt())
-                                                finalIntent.putExtra("from_start", false)
-                                            }
-                                            finalIntent.putExtra("return_result", true)
-                                        }
-
-                                        val defaultApp = MyApp.instance.defaultAppStore.get(category)
-                                        com.example.myfile.core.TrafficMonitor.debug("默认应用检查: cat=$category, app=$defaultApp")
-                                        if (!forceChooser && defaultApp != null) {
-                                            val parts = defaultApp.split('/')
-                                            if (parts.size == 2) {
-                                                val explicit = Intent(finalIntent).apply {
-                                                    component = ComponentName(parts[0], parts[1])
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
-                                                }
-                                                currentWatchingVideoKey = if (category == "video") videoKey else null
-                                                try {
-                                                    com.example.myfile.core.TrafficMonitor.debug("启动默认应用: ${parts[0]}/${parts[1]}")
-                                                    externalLauncher.launch(explicit)
-                                                    return@launch
-                                                } catch (e: Exception) {
-                                                    com.example.myfile.core.TrafficMonitor.debug("启动默认异常: ${e.message}")
-                                                    currentWatchingVideoKey = null
-                                                }
-                                            }
-                                        }
-
-                                        if (!forceChooser && finalCandidates.size == 1) {
-                                            val explicit = Intent(finalIntent).apply {
-                                                component = finalCandidates[0].component
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
-                                            }
-                                            currentWatchingVideoKey = if (category == "video") videoKey else null
-                                            try {
-                                                externalLauncher.launch(explicit)
-                                                return@launch
-                                            } catch (_: Exception) {
-                                            }
-                                        }
-
-                                        com.example.myfile.core.TrafficMonitor.debug("弹出选择器: cat=$category, 候选=${finalCandidates.size}")
-                                        openWithRequest = OpenWithRequest(
-                                            entry = entry,
-                                            category = category,
-                                            videoKey = videoKey,
-                                            intent = finalIntent,
-                                            candidates = finalCandidates
-                                        )
-                                    }
-                                }
-
-                                fun startAcceleratedDownload(entryToDownload: FileEntry, forceRename: Boolean = false) {
+                                // 打开文件逻辑与下载逻辑
+                                fun startDownloadProcess(
+                                    entryToDownload: FileEntry,
+                                    isAccelerated: Boolean,
+                                    forceRename: Boolean = false,
+                                    disableRename: Boolean = false,
+                                    onComplete: ((File) -> Unit)? = null
+                                ) {
                                     if (acc == null) return
                                     scope.launch {
                                         try {
@@ -1623,12 +1470,198 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 entryToDownload.name,
                                                 dir,
                                                 knownSize = entryToDownload.size,
-                                                forceRename = forceRename
+                                                forceRename = forceRename,
+                                                disableRename = disableRename
                                             )
                                             downloadingApkFileName = entryToDownload.name
+                                            downloadingIsAccelerated = isAccelerated
+                                            downloadingOnComplete = onComplete
                                             downloadingApkTaskId = taskId
                                         } catch (e: Exception) {
-                                            snackbarHostState.showSnackbar("启动加速下载失败: ${e.message}")
+                                            val label = if (isAccelerated) "加速下载" else "下载"
+                                            snackbarHostState.showSnackbar("启动${label}失败: ${e.message}")
+                                        }
+                                    }
+                                }
+
+                                fun openEntry(forceChooser: Boolean, bypassExistingCheck: Boolean = false) {
+                                    if (acc == null) return
+                                    scope.launch {
+                                        val appCtx = context.applicationContext
+                                        val isVid = FileOpener.isVideo(entry.name)
+                                        com.example.myfile.core.TrafficMonitor.debug("openEntry: ${entry.name}, isVid=$isVid, cat=$category, force=$forceChooser")
+                                        val fakeAvi = acc.streamFakeAvi
+                                        val ext = entry.name.substringAfterLast('.', "").lowercase()
+
+                                        val streamRemotePath = if (isVid && fakeAvi && ext != "avi") {
+                                            MyApp.instance.downloadManager.startStreamingRename(acc, entry.path) ?: entry.path
+                                        } else {
+                                            entry.path
+                                        }
+
+                                        if (isVid) {
+                                            val intent = FileOpener.buildVideoStreamIntent(
+                                                client = com.example.myfile.MyApp.instance.okHttpClient,
+                                                account = acc,
+                                                remotePath = streamRemotePath,
+                                                fileName = entry.name,
+                                                fakeAvi = fakeAvi,
+                                                originalPath = entry.path
+                                            )
+                                            if (intent == null) {
+                                                if (fakeAvi && streamRemotePath != entry.path) {
+                                                    MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                                }
+                                                return@launch
+                                            }
+
+                                            val candidates = FileOpener.resolveCandidates(appCtx, intent)
+                                            if (candidates.isEmpty()) {
+                                                if (fakeAvi && streamRemotePath != entry.path) {
+                                                    MyApp.instance.downloadManager.finishStreamingRename(entry.path)
+                                                }
+                                                val dir = File(
+                                                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                    "myfile"
+                                                )
+                                                val downloadedFile = File(dir, entry.name)
+                                                if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
+                                                    FileOpener.open(context, downloadedFile)
+                                                } else {
+                                                    startDownloadProcess(
+                                                        entryToDownload = entry,
+                                                        isAccelerated = acc.renameToVideoExt,
+                                                        disableRename = !acc.renameToVideoExt,
+                                                        onComplete = { f -> FileOpener.open(context, f) }
+                                                    )
+                                                }
+                                                return@launch
+                                            }
+
+                                            val isApk = category == "apk"
+                                            if (!forceChooser && candidates.size == 1 && !isApk) {
+                                                val explicit = Intent(intent).apply {
+                                                    component = candidates[0].component
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                }
+                                                currentWatchingVideoKey = videoKey
+                                                try {
+                                                    externalLauncher.launch(explicit)
+                                                    return@launch
+                                                } catch (_: Exception) {}
+                                            }
+
+                                            val saved = MyApp.instance.db.videoProgressDao().get(videoKey)
+                                            if (saved != null && saved.positionMs > 1000L) {
+                                                intent.putExtra("position", saved.positionMs.toInt())
+                                                intent.putExtra("position_ms", saved.positionMs)
+                                                intent.putExtra("extra_position", saved.positionMs)
+                                                intent.putExtra("time", (saved.positionMs / 1000).toInt())
+                                                intent.putExtra("from_start", false)
+                                            }
+                                            intent.putExtra("return_result", true)
+
+                                            val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                            if (!forceChooser && defaultApp != null) {
+                                                val parts = defaultApp.split('/')
+                                                if (parts.size == 2) {
+                                                    val explicit = Intent(intent).apply {
+                                                        component = ComponentName(parts[0], parts[1])
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                    }
+                                                    currentWatchingVideoKey = videoKey
+                                                    try {
+                                                        externalLauncher.launch(explicit)
+                                                        return@launch
+                                                    } catch (e: Exception) {
+                                                        currentWatchingVideoKey = null
+                                                    }
+                                                }
+                                            }
+
+                                            openWithRequest = OpenWithRequest(
+                                                entry = entry,
+                                                category = category,
+                                                videoKey = videoKey,
+                                                intent = intent,
+                                                candidates = candidates
+                                            )
+                                        } else {
+                                            // 非视频文件（无论加速或普通下载，均弹窗展示下载进度）
+                                            val dir = File(
+                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                "myfile"
+                                            )
+                                            val downloadedFile = File(dir, entry.name)
+                                            val isAccelerated = acc.renameToVideoExt && (category == "apk" || entry.size > 5 * 1024 * 1024L)
+
+                                            fun doOpenLocal(file: File) {
+                                                if (category == "apk") {
+                                                    ApkInstaller.install(context, file)
+                                                    return
+                                                }
+                                                val intent = FileOpener.buildLocalViewIntent(appCtx, file) ?: return
+                                                val candidates = FileOpener.resolveCandidates(appCtx, intent)
+                                                if (!forceChooser && candidates.size == 1) {
+                                                    val explicit = Intent(intent).apply {
+                                                        component = candidates[0].component
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                    }
+                                                    try {
+                                                        externalLauncher.launch(explicit)
+                                                        return
+                                                    } catch (_: Exception) {}
+                                                }
+                                                if (candidates.isNotEmpty()) {
+                                                    openWithRequest = OpenWithRequest(
+                                                        entry = entry,
+                                                        category = category,
+                                                        videoKey = null,
+                                                        intent = intent,
+                                                        candidates = candidates
+                                                    )
+                                                } else {
+                                                    FileOpener.open(context, file)
+                                                }
+                                            }
+
+                                            if (!bypassExistingCheck && downloadedFile.exists()) {
+                                                existingFileRequest = ExistingFileRequest(
+                                                    entry = entry,
+                                                    localFile = downloadedFile,
+                                                    isApk = category == "apk",
+                                                    onReDownload = {
+                                                        scope.launch {
+                                                            try { downloadedFile.delete() } catch (_: Exception) {}
+                                                            startDownloadProcess(
+                                                                entryToDownload = entry,
+                                                                isAccelerated = isAccelerated,
+                                                                disableRename = !isAccelerated,
+                                                                onComplete = { f -> doOpenLocal(f) }
+                                                            )
+                                                        }
+                                                    },
+                                                    onUseLocal = {
+                                                        doOpenLocal(downloadedFile)
+                                                    }
+                                                )
+                                                return@launch
+                                            }
+
+                                            if (downloadedFile.exists() && (entry.size <= 0 || downloadedFile.length() == entry.size)) {
+                                                doOpenLocal(downloadedFile)
+                                            } else {
+                                                // 本地未下载或不完整：弹窗显示下载进度
+                                                startDownloadProcess(
+                                                    entryToDownload = entry,
+                                                    isAccelerated = isAccelerated,
+                                                    disableRename = !isAccelerated,
+                                                    onComplete = { f -> doOpenLocal(f) }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1653,32 +1686,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     } else if (category == "video") {
                                         com.example.myfile.core.TrafficMonitor.debug("点击视频: ${entry.name}")
                                         openEntry(forceChooser = false)
-                                    } else if ((acc?.renameToVideoExt == true) && (category == "apk" || entry.size > 5 * 1024 * 1024L)) {
-                                        // 配置开启改名加速下载时：apk 或大于 5M 的其他文件采用加速下载方式
-                                        val localDownloaded = File(
-                                            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "myfile"),
-                                            entry.name
-                                        )
-                                        if (localDownloaded.exists()) {
-                                            existingFileRequest = ExistingFileRequest(
-                                                entry = entry,
-                                                localFile = localDownloaded,
-                                                isApk = category == "apk",
-                                                onReDownload = {
-                                                    try { localDownloaded.delete() } catch (_: Exception) {}
-                                                    startAcceleratedDownload(entry, forceRename = false)
-                                                },
-                                                onUseLocal = {
-                                                    if (category == "apk") {
-                                                        ApkInstaller.install(context, localDownloaded)
-                                                    } else {
-                                                        openEntry(forceChooser = false, bypassExistingCheck = true)
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            startAcceleratedDownload(entry, forceRename = false)
-                                        }
                                     } else {
                                         openEntry(forceChooser = false)
                                     }
@@ -1724,13 +1731,70 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                             openEntry(forceChooser = true)
                                                         }
                                                     )
-                                                    // 三个点点击后的加速下载永远生效
+                                                    // 普通下载
                                                     DropdownMenuItem(
-                                                        text = { Text("加速下载") },
+                                                        text = { Text("普通下载") },
                                                         leadingIcon = { Icon(Icons.Filled.Download, null) },
                                                         onClick = {
                                                             showMenu = false
-                                                            startAcceleratedDownload(entry, forceRename = true)
+                                                            val dir = File(
+                                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                                "myfile"
+                                                            )
+                                                            val localDownloaded = File(dir, entry.name)
+                                                            if (localDownloaded.exists()) {
+                                                                existingFileRequest = ExistingFileRequest(
+                                                                    entry = entry,
+                                                                    localFile = localDownloaded,
+                                                                    isApk = category == "apk",
+                                                                    onReDownload = {
+                                                                        try { localDownloaded.delete() } catch (_: Exception) {}
+                                                                        startDownloadProcess(entry, isAccelerated = false, disableRename = true)
+                                                                    },
+                                                                    onUseLocal = {
+                                                                        if (category == "apk") {
+                                                                            ApkInstaller.install(context, localDownloaded)
+                                                                        } else {
+                                                                            FileOpener.open(context, localDownloaded)
+                                                                        }
+                                                                    }
+                                                                )
+                                                            } else {
+                                                                startDownloadProcess(entry, isAccelerated = false, disableRename = true)
+                                                            }
+                                                        }
+                                                    )
+                                                    // 加速下载
+                                                    DropdownMenuItem(
+                                                        text = { Text("加速下载") },
+                                                        leadingIcon = { Icon(Icons.Filled.Bolt, null) },
+                                                        onClick = {
+                                                            showMenu = false
+                                                            val dir = File(
+                                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                                "myfile"
+                                                            )
+                                                            val localDownloaded = File(dir, entry.name)
+                                                            if (localDownloaded.exists()) {
+                                                                existingFileRequest = ExistingFileRequest(
+                                                                    entry = entry,
+                                                                    localFile = localDownloaded,
+                                                                    isApk = category == "apk",
+                                                                    onReDownload = {
+                                                                        try { localDownloaded.delete() } catch (_: Exception) {}
+                                                                        startDownloadProcess(entry, isAccelerated = true, forceRename = true)
+                                                                    },
+                                                                    onUseLocal = {
+                                                                        if (category == "apk") {
+                                                                            ApkInstaller.install(context, localDownloaded)
+                                                                        } else {
+                                                                            FileOpener.open(context, localDownloaded)
+                                                                        }
+                                                                    }
+                                                                )
+                                                            } else {
+                                                                startDownloadProcess(entry, isAccelerated = true, forceRename = true)
+                                                            }
                                                         }
                                                     )
                                                 }
@@ -2022,14 +2086,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         ApkDownloadDialog(
             taskId = taskId,
             fileName = downloadingApkFileName,
-            onDismissRequest = { downloadingApkTaskId = null },
+            isAccelerated = downloadingIsAccelerated,
+            onDismissRequest = {
+                downloadingApkTaskId = null
+                downloadingOnComplete = null
+            },
             onCancel = {
                 val idToCancel = taskId
                 downloadingApkTaskId = null
+                downloadingOnComplete = null
                 scope.launch {
                     MyApp.instance.downloadManager.cancel(idToCancel)
                 }
-            }
+            },
+            onComplete = downloadingOnComplete
         )
     }
 
