@@ -548,7 +548,7 @@ class WebDavViewModel : ViewModel() {
         onComplete: ((com.example.myfile.core.WebDavIndex.SyncResult) -> Unit)? = null
     ) {
         if (account.indexPath.isBlank()) {
-            _userMessage.tryEmit("未配置索引文件路径")
+            _indexSyncMessage.value = "未配置索引文件路径"
             return
         }
         viewModelScope.launch {
@@ -568,19 +568,14 @@ class WebDavViewModel : ViewModel() {
                 when (result) {
                     is com.example.myfile.core.WebDavIndex.SyncResult.UpToDate -> {
                         _indexTotal.value = result.count
-                        val msg = "索引已是最新 (共 ${result.count} 条)"
-                        _indexSyncMessage.value = msg
-                        _userMessage.tryEmit(msg)
+                        _indexSyncMessage.value = "索引已是最新 (共 ${result.count} 条)"
                     }
                     is com.example.myfile.core.WebDavIndex.SyncResult.Downloaded -> {
                         _indexTotal.value = result.count
-                        val msg = "索引下载成功 (共 ${result.count} 条)"
-                        _indexSyncMessage.value = msg
-                        _userMessage.tryEmit(msg)
+                        _indexSyncMessage.value = "索引下载成功 (共 ${result.count} 条)"
                     }
                     is com.example.myfile.core.WebDavIndex.SyncResult.Error -> {
                         _indexSyncMessage.value = result.message
-                        _userMessage.tryEmit(result.message)
                     }
                 }
                 // 同步完成后如果当前正处于搜索模式且有关键词，自动重新检索
@@ -590,9 +585,7 @@ class WebDavViewModel : ViewModel() {
                 onComplete?.invoke(result)
             } catch (e: Exception) {
                 Log.e("WebDavVM", "syncIndex failed", e)
-                val err = "索引同步异常: ${e.message}"
-                _indexSyncMessage.value = err
-                _userMessage.tryEmit(err)
+                _indexSyncMessage.value = "索引同步异常: ${e.message}"
             } finally {
                 _indexSyncing.value = false
             }
@@ -684,15 +677,8 @@ class WebDavViewModel : ViewModel() {
 
     /** 强制重新同步索引（忽略服务器未更新判断，全量拉取） */
     fun refreshIndex() {
-        val acc = _state.value.currentAccount ?: run {
-            _userMessage.tryEmit("当前无生效的 WebDAV 账户")
-            return
-        }
-        if (_indexSyncing.value) {
-            _userMessage.tryEmit("正在下载索引中，请稍候...")
-            return
-        }
-        _userMessage.tryEmit("开始检查并下载索引文件...")
+        val acc = _state.value.currentAccount ?: return
+        if (_indexSyncing.value) return
         syncIndex(acc, forceRefresh = true)
     }
 
