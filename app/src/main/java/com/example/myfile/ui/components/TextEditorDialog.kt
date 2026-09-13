@@ -58,6 +58,7 @@ fun TextEditorDialog(
     var isWordWrap by remember { mutableStateOf(true) }
     var isReadOnly by remember { mutableStateOf(true) } // 默认浏览模式，防大文件弹软键盘卡顿
     var isTruncated by remember { mutableStateOf(false) }
+    var isHexPreview by remember { mutableStateOf(false) }
     var showExitConfirm by remember { mutableStateOf(false) }
 
     val isModified = remember(textValue.text, originalText) {
@@ -76,8 +77,10 @@ fun TextEditorDialog(
                 }
                 textValue = TextFieldValue(full)
                 originalText = full
-                val truncated = full.contains("--- [文件过大，已截断显示前 2MB 内容] ---") ||
+                val hex = full.startsWith("--- [检测到二进制文件")
+                val truncated = hex || full.contains("--- [文件过大，已截断显示前 2MB 内容] ---") ||
                                 full.contains("--- [文件过大，已自动截断前 2MB 内容] ---")
+                isHexPreview = hex
                 isTruncated = truncated
                 if (truncated) {
                     isReadOnly = true
@@ -97,6 +100,10 @@ fun TextEditorDialog(
     // 保存逻辑
     fun performSave(onSuccess: () -> Unit = {}) {
         if (onSave == null || isSaving) return
+        if (isHexPreview) {
+            Toast.makeText(context, "二进制文件仅支持十六进制预览，禁止保存以防损坏文件", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (isTruncated) {
             Toast.makeText(context, "文件已截断显示，禁止保存以防丢失数据", Toast.LENGTH_SHORT).show()
             return
@@ -162,10 +169,15 @@ fun TextEditorDialog(
                                 if (textValue.text.isEmpty()) 0 else textValue.text.count { it == '\n' } + 1
                             }
                             val displaySize = if (totalBytes > 0) totalBytes else textValue.text.length.toLong()
+                            val subTitle = if (isHexPreview) {
+                                "${formatSize(displaySize)} · 十六进制 Hex 预览 (只读)"
+                            } else {
+                                "${formatSize(displaySize)} · $lineCount 行 · UTF-8" + if (isTruncated) " (已截断)" else ""
+                            }
                             Text(
-                                text = "${formatSize(displaySize)} · $lineCount 行 · UTF-8" + if (isTruncated) " (已截断)" else "",
+                                text = subTitle,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isTruncated) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (isHexPreview || isTruncated) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     },
@@ -192,7 +204,9 @@ fun TextEditorDialog(
 
                         // 只读 / 编辑切换
                         IconButton(onClick = {
-                            if (isTruncated) {
+                            if (isHexPreview) {
+                                Toast.makeText(context, "二进制文件仅支持十六进制预览，禁止编辑以防损坏文件", Toast.LENGTH_SHORT).show()
+                            } else if (isTruncated) {
                                 Toast.makeText(context, "文件过大已截断，仅支持浏览，禁止编辑以防损坏原文件", Toast.LENGTH_SHORT).show()
                             } else {
                                 isReadOnly = !isReadOnly
@@ -406,7 +420,9 @@ fun TextEditorDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (isTruncated) {
+                                text = if (isHexPreview) {
+                                    "二进制文件十六进制预览 (只读，禁止编辑与保存)"
+                                } else if (isTruncated) {
                                     "已截断显示前 2MB (只读，禁止保存)"
                                 } else if (isReadOnly) {
                                     "浏览模式 (只读，轻触右上角铅笔可编辑)"
@@ -414,7 +430,7 @@ fun TextEditorDialog(
                                     "编辑模式"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isTruncated) MaterialTheme.colorScheme.error
+                                color = if (isHexPreview || isTruncated) MaterialTheme.colorScheme.error
                                        else if (isReadOnly) MaterialTheme.colorScheme.onSurfaceVariant
                                        else MaterialTheme.colorScheme.primary
                             )

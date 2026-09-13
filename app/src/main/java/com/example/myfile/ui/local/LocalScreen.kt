@@ -970,37 +970,8 @@ fun LocalScreen(
                 withContext(Dispatchers.IO) {
                     val file = File(entry.path)
                     val total = file.length()
-                    val maxChars = 2_000_000
-                    if (total > maxChars) {
-                        val reader = file.bufferedReader(Charsets.UTF_8)
-                        val sb = StringBuilder()
-                        val buf = CharArray(16384)
-                        var readChars: Int
-                        var loaded = 0L
-                        var lastReportTime = 0L
-                        try {
-                            while (reader.read(buf).also { readChars = it } != -1) {
-                                sb.append(buf, 0, readChars)
-                                loaded += readChars
-                                val now = System.currentTimeMillis()
-                                if (now - lastReportTime > 100) {
-                                    lastReportTime = now
-                                    onProgress(loaded, total)
-                                }
-                                if (sb.length > maxChars) {
-                                    sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
-                                    break
-                                }
-                            }
-                        } finally {
-                            try { reader.close() } catch (_: Exception) {}
-                        }
-                        onProgress(total, total)
-                        sb.toString()
-                    } else {
-                        val text = file.readText(Charsets.UTF_8)
-                        onProgress(total, total)
-                        text
+                    file.inputStream().use { stream ->
+                        com.example.myfile.core.TextFileHelper.readStreamSafely(stream, total, onProgress)
                     }
                 }
             },

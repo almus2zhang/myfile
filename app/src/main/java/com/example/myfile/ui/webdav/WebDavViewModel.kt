@@ -279,7 +279,7 @@ class WebDavViewModel : ViewModel() {
         refresh()
     }
 
-    /** 流式读取文本文件 */
+    /** 流式读取文本文件（支持二进制 Hex 安全预览与长行折行防卡死） */
     suspend fun streamDownloadText(
         path: String,
         onProgress: (loadedBytes: Long, totalBytes: Long) -> Unit
@@ -290,33 +290,11 @@ class WebDavViewModel : ViewModel() {
         val body = resp.body ?: throw java.io.IOException("响应体为空")
         val total = body.contentLength()
         val inputStream = body.byteStream()
-        val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, Charsets.UTF_8))
-        val sb = StringBuilder()
-        val buf = CharArray(16384)
-        var readChars: Int
-        var loadedBytes = 0L
-        var lastReportTime = 0L
-        val maxChars = 2_000_000 // 2MB 保护
-
         try {
-            while (reader.read(buf).also { readChars = it } != -1) {
-                sb.append(buf, 0, readChars)
-                loadedBytes += readChars
-                val now = System.currentTimeMillis()
-                if (now - lastReportTime > 100) {
-                    lastReportTime = now
-                    onProgress(loadedBytes, total)
-                }
-                if (sb.length > maxChars) {
-                    sb.append("\n\n--- [文件过大，已自动截断前 2MB 内容] ---")
-                    break
-                }
-            }
+            com.example.myfile.core.TextFileHelper.readStreamSafely(inputStream, total, onProgress)
         } finally {
             try { body.close() } catch (_: Exception) {}
         }
-        onProgress(loadedBytes, total)
-        sb.toString()
     }
 
     /** 保存文本文件到 WebDAV */
