@@ -22,6 +22,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.myfile.MyApp
 import com.example.myfile.core.ApkInstaller
+import com.example.myfile.core.TrafficMonitor
 import com.example.myfile.core.FileOpener
 import java.io.File
 import java.util.Locale
@@ -41,6 +42,8 @@ fun ApkDownloadDialog(
     }
     val task by taskFlow.collectAsState(initial = null)
     val settings by MyApp.instance.currentSettings.collectAsState()
+    val speedHistory by TrafficMonitor.speedHistory.collectAsState()
+    val liveSpeed by TrafficMonitor.totalDownloadSpeed.collectAsState()
 
     var lastBytes by remember { mutableLongStateOf(0L) }
     var lastTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -201,12 +204,58 @@ fun ApkDownloadDialog(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val currentSpeedStr = if (task?.status == "DOWNLOADING") {
+                        if (liveSpeed > 0) formatSpeed(liveSpeed) else speedText
+                    } else {
+                        task?.status ?: "准备中"
+                    }
                     Text(
-                        text = if (task?.status == "DOWNLOADING") speedText else (task?.status ?: "准备中"),
+                        text = currentSpeedStr,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+
+                // 实时速度曲线卡片
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "实时速度曲线",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                            val currentSpeedDisplay = if (task?.status == "DOWNLOADING") {
+                                if (liveSpeed > 0) formatSpeed(liveSpeed) else speedText
+                            } else {
+                                task?.status ?: "准备中"
+                            }
+                            Text(
+                                text = currentSpeedDisplay,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        SpeedCurveChart(
+                            speedHistory = speedHistory,
+                            lineColor = MaterialTheme.colorScheme.primary,
+                            windowMs = 60_000L,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp)
+                        )
+                    }
                 }
 
                 // 失败提示
