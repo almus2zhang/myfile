@@ -1164,7 +1164,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     modifier = Modifier.fillMaxWidth().height(3.dp)
                                 )
                             }
-                        } else if (indexTotal > 0 || indexTime > 0L) {
+                        } else {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1172,8 +1172,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (searchQuery.isBlank()) "共 $indexTotal 条索引$indexTimeStr"
-                                           else "检索到 ${searchResults.size} 项 / 共 $indexTotal 条索引$indexTimeStr",
+                                    text = if (indexTotal > 0 || indexTime > 0L) {
+                                        if (searchQuery.isBlank()) "共 $indexTotal 条索引$indexTimeStr"
+                                        else "检索到 ${searchResults.size} 项 / 共 $indexTotal 条索引$indexTimeStr"
+                                    } else {
+                                        "暂无本地索引，点击右上角刷新"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                                 )
@@ -1367,32 +1371,29 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             }
                         }
                     } else if (displayEntries.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState()),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (!searchMode) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Text(
-                                    text = if (searchMode) {
-                                        if (searchQuery.isBlank()) {
-                                            if (indexTotal > 0) "输入关键词搜索（共 $indexTotal 条索引$indexTimeStr）"
-                                            else "暂无本地索引，点击右上方按钮刷新索引"
-                                        } else {
-                                            "未找到匹配的文件（共检索 $indexTotal 条索引$indexTimeStr）"
-                                        }
-                                    } else "此文件夹为空",
+                                    text = "此文件夹为空",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                if (searchMode && indexSyncMessage != null) {
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = indexSyncMessage!!,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                            }
+                        } else if (searchQuery.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "未找到匹配的文件",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     } else {
