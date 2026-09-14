@@ -939,9 +939,11 @@ fun LocalScreen(
     }
     // 单项删除确认对话框
     deletingEntry?.let { entry ->
+        val sizeText = if (!entry.isDirectory && entry.size >= 0L) formatSize(entry.size) else null
         com.example.myfile.ui.components.DeleteConfirmDialog(
             title = "确认删除",
             message = "确定要删除${if (entry.isDirectory) "文件夹" else "文件"} \"${entry.name}\" 吗？此操作无法撤销。",
+            sizeText = sizeText,
             onDismiss = { deletingEntry = null },
             onConfirm = {
                 vm.deleteOne(entry)
@@ -951,9 +953,29 @@ fun LocalScreen(
 
     // 批量删除确认对话框
     if (showBatchDeleteConfirm) {
+        val selectedEntries = remember(state.selected, state.files) {
+            val allMap = state.files.associateBy { it.path }
+            state.selected.mapNotNull { allMap[it] }
+        }
+        val fileCount = selectedEntries.count { !it.isDirectory }
+        val dirCount = selectedEntries.count { it.isDirectory }
+        val totalSize = selectedEntries.filter { !it.isDirectory }.sumOf { it.size.coerceAtLeast(0L) }
+        val sizeText = when {
+            totalSize > 0L -> "${formatSize(totalSize)}${if (dirCount > 0) " (不含文件夹)" else ""}"
+            fileCount > 0 -> "0 B${if (dirCount > 0) " (不含文件夹)" else ""}"
+            else -> null
+        }
+        val countDetail = when {
+            fileCount > 0 && dirCount > 0 -> "（$fileCount 个文件，$dirCount 个文件夹）"
+            dirCount > 0 -> "（$dirCount 个文件夹）"
+            fileCount > 0 -> "（$fileCount 个文件）"
+            else -> ""
+        }
+
         com.example.myfile.ui.components.DeleteConfirmDialog(
             title = "确认批量删除",
-            message = "确定要删除选中的 ${state.selected.size} 个项目吗？此操作无法撤销。",
+            message = "确定要删除选中的 ${state.selected.size} 个项目${countDetail}吗？此操作无法撤销。",
+            sizeText = sizeText,
             onDismiss = { showBatchDeleteConfirm = false },
             onConfirm = {
                 vm.deleteSelected()
