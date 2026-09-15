@@ -2,8 +2,12 @@ package com.example.myfile.data.webdav
 
 import com.example.myfile.model.FileEntry
 import com.example.myfile.model.WebDavAccount
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class WebDavTestResult(
     val ok: Boolean,
@@ -21,6 +25,8 @@ class WebDavRepository(
 ) {
     companion object {
         private const val TAG = "WebDavRepo"
+        /** 动态账户主连接宽限期：若 800ms 内主连接未返回或直接报错，立即并发侦测新地址 */
+        private const val DYNAMIC_PROBE_GRACE_MS = 800L
     }
 
     /**
@@ -48,19 +54,86 @@ class WebDavRepository(
     }
 
     private suspend fun <T> withDynamicRetry(account: WebDavAccount, block: suspend (WebDavClient) -> T): T {
-        val client = clientFactory(account)
-        try {
+        if (!account.isDynamic) {
+            val client = clientFactory(account)
             return block(client)
-        } catch (e: Exception) {
-            if (account.isDynamic) {
-                android.util.Log.w(TAG, "动态账户 [${account.name}] 访问失败 (${e.message})，正在重新获取连接地址并重试...")
-                val freshUrl = reResolveAndSave(account)
-                if (freshUrl.isNotBlank()) {
-                    val newClient = clientFactory(account.copy(resolvedUrl = freshUrl))
-                    return block(newClient)
+        }
+
+        if (account.resolvedUrl.isBlank()) {
+            val freshUrl = reResolveAndSave(account)
+            if (freshUrl.isNotBlank()) {
+                val newClient = clientFactory(account.copy(resolvedUrl = freshUrl))
+                return block(newClient)
+            }
+            throw java.io.IOException("无法解析动态地址: ${account.url}")
+        }
+
+        return coroutineScope {
+            val oldClient = clientFactory(account)
+            val resultDeferred = CompletableDeferred<T>()
+            val primaryFailed = CompletableDeferred<Exception>()
+
+            val primaryJob = launch(Dispatchers.IO) {
+                try {
+                    val res = block(oldClient)
+                    resultDeferred.complete(res)
+                } catch (e: Exception) {
+                    primaryFailed.complete(e)
                 }
             }
-            throw e
+
+            val watchdogJob = launch(Dispatchers.IO) {
+                // 等待主连接报错，或等待 800ms 宽限期。若主连接在 800ms 内未成功或直接报错，说明连接受阻/超时，立即并发侦测新地址
+                val failure = withTimeoutOrNull(DYNAMIC_PROBE_GRACE_MS) {
+                    primaryFailed.await()
+                }
+                if (resultDeferred.isCompleted) return@launch
+
+                android.util.Log.i(
+                    TAG,
+                    "动态账户 [${account.name}] 主连接未就绪或异常${if (failure != null) " (${failure.message})" else " (耗时超 ${DYNAMIC_PROBE_GRACE_MS}ms)"}，正在同步侦测新地址: ${account.url}"
+                )
+                try {
+                    val freshUrl = reResolveAndSave(account)
+                    if (freshUrl.isNotBlank()) {
+                        if (freshUrl != account.resolvedUrl || primaryFailed.isCompleted) {
+                            android.util.Log.i(TAG, "动态账户侦测到有效端点，立即切换并重试: $freshUrl (原地址: ${account.resolvedUrl})")
+                            oldClient.cancelAll()
+                            primaryJob.cancel()
+                            val newClient = clientFactory(account.copy(resolvedUrl = freshUrl))
+                            val res = block(newClient)
+                            resultDeferred.complete(res)
+                            return@launch
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "同步侦测新地址或重试失败: ${e.message}")
+                    if (!resultDeferred.isCompleted && primaryFailed.isCompleted) {
+                        resultDeferred.completeExceptionally(primaryFailed.await())
+                        return@launch
+                    }
+                }
+
+                // 若侦测的地址与原地址相同，且主连接仍在等待，则等待主连接结束或报错
+                try {
+                    val primaryErr = primaryFailed.await()
+                    if (!resultDeferred.isCompleted) {
+                        resultDeferred.completeExceptionally(primaryErr)
+                    }
+                } catch (e: Exception) {
+                    if (!resultDeferred.isCompleted) {
+                        resultDeferred.completeExceptionally(e)
+                    }
+                }
+            }
+
+            try {
+                resultDeferred.await()
+            } finally {
+                primaryJob.cancel()
+                watchdogJob.cancel()
+                oldClient.cancelAll()
+            }
         }
     }
 

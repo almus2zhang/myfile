@@ -41,6 +41,31 @@ class WebDavClient(
     private val authHeader: String =
         "Basic " + Base64.getEncoder().encodeToString("$username:$password".toByteArray())
 
+    private val activeCalls = java.util.concurrent.ConcurrentHashMap.newKeySet<okhttp3.Call>()
+
+    /** 取消当前客户端的所有活动网络请求（用于快速切断失效/挂起的连接） */
+    fun cancelAll() {
+        activeCalls.forEach {
+            try { it.cancel() } catch (_: Exception) {}
+        }
+        activeCalls.clear()
+    }
+
+    private fun newTrackedCall(req: Request): okhttp3.Call {
+        val call = client.newCall(req)
+        activeCalls.add(call)
+        return call
+    }
+
+    private inline fun <R> executeCall(req: Request, block: (Response) -> R): R {
+        val call = newTrackedCall(req)
+        try {
+            return call.execute().use(block)
+        } finally {
+            activeCalls.remove(call)
+        }
+    }
+
     /** 获取认证头，供下载引擎复用 */
     fun authHeader(): String = authHeader
 
@@ -99,7 +124,7 @@ class WebDavClient(
     /** 探测服务器 WebDAV 能力（OPTIONS），不抛异常 */
     fun probe(): String = try {
         val req = requestBuilder("OPTIONS", "/").build()
-        client.newCall(req).execute().use { resp ->
+        executeCall(req) { resp ->
             val dav = resp.header("DAV") ?: ""
             val allow = resp.header("Allow") ?: ""
             val server = resp.header("Server") ?: ""
@@ -160,7 +185,7 @@ class WebDavClient(
 
     /** 执行请求并捕获状态码、body、Location 头 */
     private fun executeWithCapture(req: Request): Triple<Int, String, String?> =
-        client.newCall(req).execute().use { resp ->
+        executeCall(req) { resp ->
             Triple(resp.code, resp.body?.string() ?: "", resp.header("Location"))
         }
 
@@ -197,7 +222,7 @@ class WebDavClient(
                       </d:prop>
                     </d:propfind>""".trimIndent().toRequestBody("application/xml; charset=utf-8".toMediaType())).build()
                 Log.d("WebDavClient", "probeAndList trying: $c/")
-                client.newCall(req).execute().use { resp ->
+                executeCall(req) { resp ->
                     Log.d("WebDavClient", "probeAndList $c/ -> ${resp.code}")
                     if (resp.code == 207) {
                         val files = parsePropfind(resp.body?.string() ?: "", "/")
@@ -217,7 +242,7 @@ class WebDavClient(
         // 方法1：HEAD 读 Content-Length（最简单可靠）
         try {
             val headReq = requestBuilder("HEAD", path).build()
-            client.newCall(headReq).execute().use { resp ->
+            executeCall(headReq) { resp ->
                 val len = resp.header("Content-Length")?.toLongOrNull()
                 if (len != null && len > 0) {
                     Log.d("WebDavClient", "getSize via HEAD: $len")
@@ -246,7 +271,7 @@ class WebDavClient(
                 .header("Content-Type", "application/xml; charset=utf-8")
                 .method("PROPFIND", body.toRequestBody("application/xml; charset=utf-8".toMediaType()))
                 .build()
-            client.newCall(req).execute().use { resp ->
+            executeCall(req) { resp ->
                 val text = resp.body?.string() ?: ""
                 val size = extractContentLength(text)
                 if (size > 0) {
@@ -271,13 +296,13 @@ class WebDavClient(
             .header("Range", "bytes=0-0")
             .build()
         return try {
-            client.newCall(req).execute().use { it.code == 206 }
+            executeCall(req) { it.code == 206 }
         } catch (e: Exception) { false }
     }
 
     fun mkcol(path: String): Boolean {
         val req = requestBuilder("MKCOL", path).build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 }
+        executeCall(req) { return it.isSuccessful || it.code == 201 }
     }
 
     fun delete(path: String): Boolean {
@@ -288,7 +313,7 @@ class WebDavClient(
             return false
         }
         val req = requestBuilder("DELETE", path).build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 204 }
+        executeCall(req) { return it.isSuccessful || it.code == 204 }
     }
 
     fun move(from: String, to: String, mtime: Long? = null): Boolean {
@@ -299,7 +324,7 @@ class WebDavClient(
             b.header("X-OC-Mtime", "${mtime / 1000}")
         }
         val req = b.build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 }
+        executeCall(req) { return it.isSuccessful || it.code == 201 }
     }
 
     fun copy(from: String, to: String): Boolean {
@@ -307,7 +332,7 @@ class WebDavClient(
             .header("Destination", fullUrl(to))
             .header("Overwrite", "T")
             .build()
-        client.newCall(req).execute().use { return it.isSuccessful || it.code == 201 || it.code == 204 }
+        executeCall(req) { return it.isSuccessful || it.code == 201 || it.code == 204 }
     }
 
     fun uploadFile(path: String, file: java.io.File): Boolean {
@@ -315,7 +340,7 @@ class WebDavClient(
         var currentUrl = fullUrl(path)
         repeat(4) {
             val req = requestBuilder("PUT", path, body).url(currentUrl).build()
-            client.newCall(req).execute().use { resp ->
+            executeCall(req) { resp ->
                 if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
                     val loc = resp.header("Location")
                     if (loc != null) {
@@ -342,7 +367,7 @@ class WebDavClient(
         var currentUrl = fullUrl(path)
         repeat(4) {
             val req = requestBuilder("PUT", path, body).url(currentUrl).build()
-            client.newCall(req).execute().use { resp ->
+            executeCall(req) { resp ->
                 if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
                     val loc = resp.header("Location")
                     if (loc != null) {
@@ -369,7 +394,7 @@ class WebDavClient(
         var currentUrl = fullUrl(path)
         repeat(4) {
             val req = requestBuilder("PUT", path, body).url(currentUrl).build()
-            client.newCall(req).execute().use { resp ->
+            executeCall(req) { resp ->
                 if (resp.code in 301..302 || resp.code == 307 || resp.code == 308) {
                     val loc = resp.header("Location")
                     if (loc != null) {
@@ -394,7 +419,13 @@ class WebDavClient(
     /** 下载完整文件（单连接，仅小文件用） */
     fun download(path: String): Response {
         val req = requestBuilder("GET", path).build()
-        return client.newCall(req).execute()
+        val call = newTrackedCall(req)
+        try {
+            return call.execute()
+        } catch (e: Exception) {
+            activeCalls.remove(call)
+            throw e
+        }
     }
 
     /** 构造 Range 请求的 Response，由引擎调用 */
@@ -403,7 +434,13 @@ class WebDavClient(
             .header("Range", "bytes=$start-$end")
             .header("Accept-Encoding", "identity")
             .build()
-        return client.newCall(req).execute()
+        val call = newTrackedCall(req)
+        try {
+            return call.execute()
+        } catch (e: Exception) {
+            activeCalls.remove(call)
+            throw e
+        }
     }
 
     private fun parsePropfind(xml: String, requestPath: String): List<FileEntry> {
@@ -572,8 +609,8 @@ class WebDavClient(
                 val ipOnly = java.net.InetAddress.getByAddress(ip.address)
 
                 val raw = java.net.Socket()
-                raw.connect(java.net.InetSocketAddress(ipOnly, port), 8000)
-                raw.soTimeout = 8000
+                raw.connect(java.net.InetSocketAddress(ipOnly, port), 5000)
+                raw.soTimeout = 5000
 
                 val ssl = sc.socketFactory.createSocket(raw, null, port, true) as javax.net.ssl.SSLSocket
                 try {
@@ -585,8 +622,8 @@ class WebDavClient(
                 socket = ssl
             } else {
                 socket = java.net.Socket()
-                socket.connect(java.net.InetSocketAddress(host, port), 8000)
-                socket.soTimeout = 8000
+                socket.connect(java.net.InetSocketAddress(host, port), 5000)
+                socket.soTimeout = 5000
             }
 
             socket.use { s ->

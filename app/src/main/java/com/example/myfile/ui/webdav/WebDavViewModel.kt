@@ -155,13 +155,17 @@ class WebDavViewModel : ViewModel() {
         viewModelScope.launch {
             var initialized = false
             accountStore.accounts.collect { list ->
-                val cur = _state.value.currentAccount ?: list.firstOrNull()
+                val curId = _state.value.currentAccount?.id
+                val cur = (if (curId != null) list.find { it.id == curId } else null)
+                    ?: _state.value.currentAccount
+                    ?: list.firstOrNull()
                 val prev = _state.value
                 val initialPath = if (cur != null && cur.rememberLastPath) pathStore.getLastPath(cur.id) else "/"
                 val (mode, asc) = if (cur != null) getFolderSort(cur.id, initialPath) else (SortMode.NAME to true)
                 // 加载该目录的视图偏好
                 if (cur != null) loadFolderPrefs(cur.id, initialPath)
-                _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = initialPath, sortMode = mode, sortAsc = asc)
+                val targetPath = if (prev.currentAccount != null) prev.currentPath else initialPath
+                _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = targetPath, sortMode = mode, sortAsc = asc)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
                 if (!initialized && cur != null) {
                     initialized = true

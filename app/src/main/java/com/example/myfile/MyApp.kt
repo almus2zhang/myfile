@@ -144,7 +144,14 @@ class MyApp : Application(), ImageLoaderFactory {
 
         webDavRepository = WebDavRepository(
             clientFactory = { account ->
-                WebDavClient(okHttpClient, account.connectionUrl(), account.username, account.password)
+                val client = if (account.isDynamic) {
+                    okHttpClient.newBuilder()
+                        .connectTimeout(6, TimeUnit.SECONDS)
+                        .build()
+                } else {
+                    okHttpClient
+                }
+                WebDavClient(client, account.connectionUrl(), account.username, account.password)
             },
             accountStore = accountStore
         )
