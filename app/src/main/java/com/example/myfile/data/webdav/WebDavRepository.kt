@@ -127,12 +127,17 @@ class WebDavRepository(
                 }
             }
 
+            var success = false
             try {
-                resultDeferred.await()
+                val res = resultDeferred.await()
+                success = true
+                res
             } finally {
                 primaryJob.cancel()
                 watchdogJob.cancel()
-                oldClient.cancelAll()
+                if (!success) {
+                    oldClient.cancelAll()
+                }
             }
         }
     }

@@ -9,7 +9,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.BufferedSource
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
@@ -474,7 +477,25 @@ class WebDavClient(
         val req = requestBuilder("GET", path).build()
         val call = newTrackedCall(req)
         try {
-            return call.execute()
+            val response = call.execute()
+            val originalBody = response.body
+            if (originalBody == null) {
+                activeCalls.remove(call)
+                return response
+            }
+            val wrappedBody = object : ResponseBody() {
+                override fun contentType(): MediaType? = originalBody.contentType()
+                override fun contentLength(): Long = originalBody.contentLength()
+                override fun source(): BufferedSource = originalBody.source()
+                override fun close() {
+                    try {
+                        originalBody.close()
+                    } finally {
+                        activeCalls.remove(call)
+                    }
+                }
+            }
+            return response.newBuilder().body(wrappedBody).build()
         } catch (e: Exception) {
             activeCalls.remove(call)
             throw e
@@ -489,7 +510,25 @@ class WebDavClient(
             .build()
         val call = newTrackedCall(req)
         try {
-            return call.execute()
+            val response = call.execute()
+            val originalBody = response.body
+            if (originalBody == null) {
+                activeCalls.remove(call)
+                return response
+            }
+            val wrappedBody = object : ResponseBody() {
+                override fun contentType(): MediaType? = originalBody.contentType()
+                override fun contentLength(): Long = originalBody.contentLength()
+                override fun source(): BufferedSource = originalBody.source()
+                override fun close() {
+                    try {
+                        originalBody.close()
+                    } finally {
+                        activeCalls.remove(call)
+                    }
+                }
+            }
+            return response.newBuilder().body(wrappedBody).build()
         } catch (e: Exception) {
             activeCalls.remove(call)
             throw e

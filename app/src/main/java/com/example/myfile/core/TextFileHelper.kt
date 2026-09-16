@@ -277,33 +277,26 @@ object TextFileHelper {
             }
         }
 
-        // 处理第一个 buffer（跳过可能存在的 BOM）
+        // 处理流数据：将 initialBuffer（跳过 BOM）与 inputStream 拼接成连续流，由 InputStreamReader 统一按字符集解码，避免边界多字节截断乱码
         val actualInitialOffset = bomSkip
         val actualInitialLen = maxOf(0, initialRead - actualInitialOffset)
-        if (actualInitialLen > 0) {
-            val firstText = String(initialBuffer, actualInitialOffset, actualInitialLen, targetCharset)
-            val chars = firstText.toCharArray()
-            appendSafeChunk(chars, chars.size)
-            loadedBytes += initialRead
-        }
+        val initialStream = java.io.ByteArrayInputStream(initialBuffer, actualInitialOffset, actualInitialLen)
+        val combinedStream = java.io.SequenceInputStream(initialStream, inputStream)
 
-        // 继续逐块读取剩余流
-        if (!isTruncated) {
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream, targetCharset))
-            val buf = CharArray(16384)
-            var readChars: Int
-            while (reader.read(buf).also { readChars = it } != -1) {
-                appendSafeChunk(buf, readChars)
-                loadedBytes += readChars
-                val now = System.currentTimeMillis()
-                if (now - lastReportTime > 100) {
-                    lastReportTime = now
-                    onProgress(loadedBytes, totalBytes)
-                }
-                if (isTruncated || sb.length >= maxChars) {
-                    isTruncated = true
-                    break
-                }
+        val reader = java.io.BufferedReader(java.io.InputStreamReader(combinedStream, targetCharset))
+        val buf = CharArray(16384)
+        var readChars: Int
+        while (reader.read(buf).also { readChars = it } != -1) {
+            appendSafeChunk(buf, readChars)
+            loadedBytes += readChars
+            val now = System.currentTimeMillis()
+            if (now - lastReportTime > 100) {
+                lastReportTime = now
+                onProgress(loadedBytes, totalBytes)
+            }
+            if (isTruncated || sb.length >= maxChars) {
+                isTruncated = true
+                break
             }
         }
 

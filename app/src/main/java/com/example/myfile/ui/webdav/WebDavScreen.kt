@@ -2601,14 +2601,44 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
     // 内置文本浏览和编辑器
     editingTextEntry?.let { entry ->
+        val localTextFile = remember(entry.name) {
+            java.io.File(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                "myfile/${entry.name}"
+            )
+        }
+        val isLocalIdentical = remember(entry, localTextFile) {
+            val sameSize = (entry.size >= 0L && localTextFile.length() == entry.size)
+            val sameTime = if (entry.lastModified > 0L && localTextFile.lastModified() > 0L) {
+                Math.abs(localTextFile.lastModified() - entry.lastModified) < 2000L
+            } else {
+                entry.size > 0L && localTextFile.length() == entry.size
+            }
+            localTextFile.exists() && sameSize && sameTime
+        }
+
         TextEditorDialog(
             fileName = entry.name,
             filePath = entry.path,
             onLoad = { charset, onProgress ->
-                vm.streamDownloadText(entry.path, charset, onProgress)
+                if (isLocalIdentical) {
+                    com.example.myfile.core.TrafficMonitor.debug("文本文件与本地缓存一致，优先从本地读取: ${localTextFile.name}")
+                    localTextFile.inputStream().use { stream ->
+                        com.example.myfile.core.TextFileHelper.readStreamSafely(stream, localTextFile.length(), charset, onProgress)
+                    }
+                } else {
+                    vm.streamDownloadText(entry.path, charset, onProgress)
+                }
             },
             onSave = { newText, charset ->
-                vm.saveText(entry.path, newText, charset)
+                val ok = vm.saveText(entry.path, newText, charset)
+                if (ok && localTextFile.exists()) {
+                    try {
+                        val cs = try { java.nio.charset.Charset.forName(charset) } catch (_: Exception) { Charsets.UTF_8 }
+                        localTextFile.writeBytes(newText.toByteArray(cs))
+                    } catch (_: Exception) {}
+                }
+                ok
             },
             onDismiss = { editingTextEntry = null }
         )
