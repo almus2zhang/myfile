@@ -290,6 +290,59 @@ class WebDavClient(
         return regex.find(xml)?.groupValues?.get(1)?.toLongOrNull() ?: -1L
     }
 
+    /** 获取文件修改时间：优先用 HEAD 读 Last-Modified，回退 PROPFIND Depth:0 */
+    fun getLastModified(path: String): Long {
+        try {
+            val headReq = requestBuilder("HEAD", path).build()
+            executeCall(headReq) { resp ->
+                val lm = resp.header("Last-Modified")
+                if (!lm.isNullOrBlank()) {
+                    val parsed = parseHttpDate(lm)
+                    if (parsed > 0L) {
+                        Log.d("WebDavClient", "getLastModified via HEAD: $parsed")
+                        return parsed
+                    }
+                }
+            }
+        } catch (e: Exception) { Log.w("WebDavClient", "HEAD getLastModified failed: ${e.message}") }
+
+        try {
+            val body = """<?xml version="1.0"?>
+                <d:propfind xmlns:d="DAV:">
+                  <d:prop><d:getlastmodified/></d:prop>
+                </d:propfind>""".trimIndent()
+            val req = requestBuilder("PROPFIND", path)
+                .header("Depth", "0")
+                .header("Content-Type", "application/xml; charset=utf-8")
+                .method("PROPFIND", body.toRequestBody("application/xml; charset=utf-8".toMediaType()))
+                .build()
+            executeCall(req) { resp ->
+                val text = resp.body?.string() ?: ""
+                val lm = extractLastModified(text)
+                if (lm > 0L) {
+                    Log.d("WebDavClient", "getLastModified via PROPFIND: $lm")
+                    return lm
+                }
+            }
+        } catch (e: Exception) { Log.w("WebDavClient", "PROPFIND getLastModified failed: ${e.message}") }
+
+        return 0L
+    }
+
+    private fun parseHttpDate(dateStr: String): Long {
+        return try {
+            val sdf = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            sdf.parse(dateStr.trim())?.time ?: 0L
+        } catch (_: Exception) { 0L }
+    }
+
+    private fun extractLastModified(xml: String): Long {
+        val regex = Regex("""<[^>]*getlastmodified[^>]*>([^<]+)<""", RegexOption.IGNORE_CASE)
+        val text = regex.find(xml)?.groupValues?.get(1) ?: return 0L
+        return parseHttpDate(text)
+    }
+
     /** 检测服务器是否支持 Range（返回 206） */
     fun supportsRange(path: String): Boolean {
         val req = requestBuilder("GET", path)

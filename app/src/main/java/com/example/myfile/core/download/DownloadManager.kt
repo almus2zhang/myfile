@@ -45,6 +45,7 @@ class DownloadManager(
     private val runningTasks = mutableMapOf<Long, kotlinx.coroutines.Job>()
     private val mutex = Mutex()
     private val renamePrefs = context.getSharedPreferences("download_pending_renames", Context.MODE_PRIVATE)
+    private val taskLastModifiedMap = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     /** 待改回原名的残留记录（上次 App 被杀/断网导致改名未改回） */
     data class PendingRenameInfo(
@@ -108,7 +109,8 @@ class DownloadManager(
         localDir: File,
         knownSize: Long = -1L,
         forceRename: Boolean = false,
-        disableRename: Boolean = false
+        disableRename: Boolean = false,
+        remoteLastModified: Long = 0L
     ): Long = withContext(Dispatchers.IO) {
         val client = clientProvider(account)
         // 优先用已知大小（列目录时 PROPFIND Depth:1 已拿到 getcontentlength），否则回退 HEAD/PROPFIND
@@ -117,6 +119,11 @@ class DownloadManager(
             totalBytes = client.getSize(remotePath)
         }
         require(totalBytes > 0) { "cannot get file size (knownSize=$knownSize)" }
+
+        var fileTime = remoteLastModified
+        if (fileTime <= 0L) {
+            fileTime = client.getLastModified(remotePath)
+        }
 
         val localFile = File(localDir, fileName)
 
@@ -162,6 +169,9 @@ class DownloadManager(
                 authHeader = client.authHeader()
             )
         )
+        if (fileTime > 0L) {
+            taskLastModifiedMap[taskId] = fileTime
+        }
         launchEngine(taskId, account, downloadPath, localFile, totalBytes) {
             // 下载结束后（无论成败），把服务器端文件改回原名，并清理持久化记录
             if (shouldRename && downloadPath != remotePath) {
@@ -397,30 +407,32 @@ class DownloadManager(
                     // 单连接完整 GET（不用 Range），模拟 CX 文件浏览器的行为
                     DownloadLog.log(TAG, "using single connection full GET mode")
                     fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
-                    taskDao.markCompleted(taskId)
                 } else {
                     val engine = ParallelDownloadEngine(clients, config, chunkDao)
                     val raf = RandomAccessFile(localFile, "rw").apply { setLength(totalBytes) }
                     var lastProgressJob: kotlinx.coroutines.Job? = null
-                    raf.use {
-                        val result = engine.startDownload(remotePath, it, taskId, totalBytes) { downloaded, _ ->
+                    val result = raf.use {
+                        val r = engine.startDownload(remotePath, it, taskId, totalBytes) { downloaded, _ ->
                             lastProgressJob = scope.launch {
                                 taskDao.updateProgress(taskId, downloaded)
                             }
                         }
                         // 等待可能尚未完成的并发进度入库协程
                         try { lastProgressJob?.join() } catch (_: Exception) {}
+                        r
+                    }
 
-                        when (result) {
-                            DownloadResult.Success -> taskDao.markCompleted(taskId)
-                            DownloadResult.UnsupportedRange -> {
-                                // 回退单连接顺序下载
-                                fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
-                                taskDao.markCompleted(taskId)
-                            }
-                            DownloadResult.Canceled -> taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
-                            is DownloadResult.Failed -> taskDao.updateStatus(taskId, TransferStatus.FAILED.name, result.message)
+                    when (result) {
+                        DownloadResult.Success -> {
+                            applyRemoteTimestamp(taskId, localFile)
+                            taskDao.markCompleted(taskId)
                         }
+                        DownloadResult.UnsupportedRange -> {
+                            // 回退单连接顺序下载
+                            fallbackSingle(client, remotePath, localFile, taskId, totalBytes)
+                        }
+                        DownloadResult.Canceled -> taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
+                        is DownloadResult.Failed -> taskDao.updateStatus(taskId, TransferStatus.FAILED.name, result.message)
                     }
                 }
             } catch (e: Exception) {
@@ -434,6 +446,18 @@ class DownloadManager(
             }
         }
         scope.launch { mutex.withLock { runningTasks[taskId] = job } }
+    }
+
+    private fun applyRemoteTimestamp(taskId: Long, localFile: File) {
+        val timeToSet = taskLastModifiedMap.remove(taskId)
+        if (timeToSet != null && timeToSet > 0L) {
+            try {
+                val ok = localFile.setLastModified(timeToSet)
+                DownloadLog.log(TAG, "setLastModified to $timeToSet for ${localFile.name}, success=$ok")
+            } catch (e: Exception) {
+                Log.w(TAG, "setLastModified failed: ${e.message}")
+            }
+        }
     }
 
     /** 服务器不支持 Range 时的单连接回退 */
@@ -461,10 +485,11 @@ class DownloadManager(
                             lastReport = total
                         }
                     }
-                    taskDao.markCompleted(taskId)
                 }
             }
         }
+        applyRemoteTimestamp(taskId, localFile)
+        taskDao.markCompleted(taskId)
     }
 
     suspend fun pause(taskId: Long) {
@@ -496,6 +521,12 @@ class DownloadManager(
         } else {
             downloadPath = task.remoteUrl
         }
+        if (taskLastModifiedMap[taskId] == null) {
+            val lm = client.getLastModified(task.remoteUrl)
+            if (lm > 0L) {
+                taskLastModifiedMap[taskId] = lm
+            }
+        }
         launchEngine(taskId, account, downloadPath, File(task.localPath), task.totalBytes) {
             if (shouldRename && downloadPath != task.remoteUrl) {
                 try {
@@ -510,6 +541,7 @@ class DownloadManager(
     }
 
     suspend fun cancel(taskId: Long) {
+        taskLastModifiedMap.remove(taskId)
         runningTasks[taskId]?.cancel()
         mutex.withLock { runningTasks.remove(taskId) }
         taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)

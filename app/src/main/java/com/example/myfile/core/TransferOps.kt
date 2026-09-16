@@ -56,7 +56,7 @@ object TransferOps {
                     val mgr = MyApp.instance.downloadManager
                     com.example.myfile.core.download.DownloadService.start(context)
                     if (!item.entry.isDirectory) {
-                        mgr.startDownload(item.account, item.entry.path, item.entry.name, targetDir, knownSize = item.entry.size)
+                        mgr.startDownload(item.account, item.entry.path, item.entry.name, targetDir, knownSize = item.entry.size, remoteLastModified = item.entry.lastModified)
                         successCount++
                     } else {
                         // 目录下载：递归遍历该目录下载所有文件
@@ -85,7 +85,7 @@ object TransferOps {
             if (child.isDirectory) {
                 downloadWebDavDirectory(context, account, child.path, File(localTargetDir, child.name))
             } else {
-                mgr.startDownload(account, child.path, child.name, localTargetDir, knownSize = child.size)
+                mgr.startDownload(account, child.path, child.name, localTargetDir, knownSize = child.size, remoteLastModified = child.lastModified)
             }
         }
     }

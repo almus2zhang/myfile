@@ -929,7 +929,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                         client = com.example.myfile.MyApp.instance.okHttpClient,
                                                         authHeader = authForShare,
                                                         url = baseForShare + p,
-                                                        fileName = e.name
+                                                        fileName = e.name,
+                                                        remoteLastModified = e.lastModified
                                                     )
                                                 }
                                             }
@@ -1482,11 +1483,17 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 dir,
                                                 knownSize = entryToDownload.size,
                                                 forceRename = forceRename,
-                                                disableRename = disableRename
+                                                disableRename = disableRename,
+                                                remoteLastModified = entryToDownload.lastModified
                                             )
                                             downloadingApkFileName = entryToDownload.name
                                             downloadingIsAccelerated = isAccelerated
-                                            downloadingOnComplete = onComplete
+                                            downloadingOnComplete = { downloadedFile ->
+                                                if (entryToDownload.lastModified > 0L) {
+                                                    try { downloadedFile.setLastModified(entryToDownload.lastModified) } catch (_: Exception) {}
+                                                }
+                                                onComplete?.invoke(downloadedFile)
+                                            }
                                             downloadingApkTaskId = taskId
                                         } catch (e: Exception) {
                                             val label = if (isAccelerated) "加速下载" else "下载"
@@ -1831,7 +1838,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                                         client = com.example.myfile.MyApp.instance.okHttpClient,
                                                                         authHeader = auth ?: "",
                                                                         url = fullUrl,
-                                                                        fileName = entry.name
+                                                                        fileName = entry.name,
+                                                                        remoteLastModified = entry.lastModified
                                                                     )
                                                                 }
                                                                 if (tmp != null) {
@@ -2146,11 +2154,33 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                 }
 
                 Column {
-                    Text(
-                        text = req.entry.name,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                    val isRemoteNewer = req.entry.lastModified > 0L && req.entry.lastModified > req.localFile.lastModified()
+                    val isLocalNewer = req.localFile.lastModified() > 0L && req.localFile.lastModified() > req.entry.lastModified
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = req.entry.name,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isRemoteNewer) {
+                            Text(
+                                text = "远程更新",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else if (isLocalNewer) {
+                            Text(
+                                text = "本地更新",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -2158,24 +2188,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            val isRemoteNewer = req.entry.lastModified > 0L && req.entry.lastModified > req.localFile.lastModified()
-                            val isLocalNewer = req.localFile.lastModified() > 0L && req.localFile.lastModified() > req.entry.lastModified
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "远程文件 (WebDAV):",
-                                    fontWeight = FontWeight.SemiBold,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                                if (isRemoteNewer) {
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "时间更新",
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
+                            Text(
+                                text = "远程文件 (WebDAV):",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "大小: ${if (req.entry.size > 0) formatSize(req.entry.size) else "未知"}",
@@ -2190,22 +2208,12 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                             Spacer(Modifier.height(8.dp))
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "本地已存文件 (Downloads/myfile/):",
-                                    fontWeight = FontWeight.SemiBold,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                if (isLocalNewer) {
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "时间更新",
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
+                            Text(
+                                text = "本地已存文件 (Downloads/myfile/):",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "大小: ${formatSize(req.localFile.length())}",

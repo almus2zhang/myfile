@@ -802,7 +802,7 @@ class WebDavViewModel : ViewModel() {
                     "myfile"
                 )
                 if (!dir.exists()) dir.mkdirs()
-                mgr.startDownload(account, entry.path, entry.name, dir, knownSize = entry.size)
+                mgr.startDownload(account, entry.path, entry.name, dir, knownSize = entry.size, remoteLastModified = entry.lastModified)
             } catch (e: Exception) {
                 Log.e("WebDavVM", "downloadFile failed", e)
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName

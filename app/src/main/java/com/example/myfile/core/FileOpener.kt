@@ -152,7 +152,8 @@ object FileOpener {
         authHeader: String,
         url: String,
         fileName: String,
-        onProgress: ((Long) -> Unit)? = null
+        onProgress: ((Long) -> Unit)? = null,
+        remoteLastModified: Long = 0L
     ): File? = withContext(Dispatchers.IO) {
         val tmp = File(MyApp.instance.cacheDir, "open_${System.currentTimeMillis()}_$fileName")
         try {
@@ -162,8 +163,17 @@ object FileOpener {
                 .header("User-Agent", "myfile/1.0 (Android; WebDAV)")
                 .get()
                 .build()
+            var headerLastMod = 0L
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
+                val lmHeader = resp.header("Last-Modified")
+                if (!lmHeader.isNullOrBlank()) {
+                    headerLastMod = try {
+                        val sdf = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+                        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        sdf.parse(lmHeader.trim())?.time ?: 0L
+                    } catch (_: Exception) { 0L }
+                }
                 val bodyStream = resp.body?.byteStream() ?: return@withContext null
                 bodyStream.use { input ->
                     tmp.outputStream().use { out ->
@@ -178,6 +188,10 @@ object FileOpener {
                         }
                     }
                 }
+            }
+            val finalTime = if (remoteLastModified > 0L) remoteLastModified else headerLastMod
+            if (finalTime > 0L) {
+                try { tmp.setLastModified(finalTime) } catch (_: Exception) {}
             }
             tmp
         } catch (e: Exception) {
