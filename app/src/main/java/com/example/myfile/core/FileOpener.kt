@@ -126,13 +126,13 @@ object FileOpener {
     }
 
     /** 记录某类别的默认程序 */
-    suspend fun setDefault(category: String, candidate: AppCandidate) {
-        MyApp.instance.defaultAppStore.set(category, candidate.packageName, candidate.activityName)
+    suspend fun setDefault(category: String, candidate: AppCandidate, ext: String? = null) {
+        MyApp.instance.defaultAppStore.set(category, candidate.packageName, candidate.activityName, ext)
     }
 
     /** 清除某类别的默认程序 */
-    suspend fun clearDefault(category: String) {
-        MyApp.instance.defaultAppStore.clear(category)
+    suspend fun clearDefault(category: String, ext: String? = null) {
+        MyApp.instance.defaultAppStore.clear(category, ext)
     }
 
     /** 用指定候选应用打开 */

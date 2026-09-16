@@ -28,30 +28,45 @@ class DefaultAppStore(private val context: Context) {
         p[key]?.let { decode(it) } ?: emptyMap()
     }
 
-    /** 读取某个类别的默认程序（"packageName/activityName" 或 null） */
-    suspend fun get(category: String): String? {
-        val res = map.first()[category]
-        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.get: $category -> $res")
+    /** 读取某个类别或后缀的默认程序（"packageName/activityName" 或 null） */
+    suspend fun get(category: String, ext: String? = null): String? {
+        val current = map.first()
+        val cleanExt = ext?.trim()?.removePrefix(".")?.lowercase()
+        val res = (if (!cleanExt.isNullOrEmpty()) current[cleanExt] else null) ?: current[category]
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.get: cat=$category, ext=$cleanExt -> $res")
         return res
     }
 
-    /** 设置某个类别的默认程序 */
-    suspend fun set(category: String, packageName: String, activityName: String) {
-        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set开始: $category -> $packageName/$activityName")
+    /** 读取某个类别的默认程序（重载兼容） */
+    suspend fun get(category: String): String? = get(category, null)
+
+    /** 设置默认程序（同时记录 category 和具体的 ext） */
+    suspend fun set(category: String, packageName: String, activityName: String, ext: String? = null) {
+        val cleanExt = ext?.trim()?.removePrefix(".")?.lowercase()
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set开始: cat=$category, ext=$cleanExt -> $packageName/$activityName")
         context.defaultAppStore.edit { p ->
             val current = p[key]?.let { decode(it) } ?: emptyMap()
-            val updated = current + (category to "$packageName/$activityName")
-            p[key] = encode(updated)
+            val mutable = current.toMutableMap()
+            mutable[category] = "$packageName/$activityName"
+            if (!cleanExt.isNullOrEmpty()) {
+                mutable[cleanExt] = "$packageName/$activityName"
+            }
+            p[key] = encode(mutable)
         }
-        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set完成: $category")
+        com.example.myfile.core.TrafficMonitor.debug("DefaultAppStore.set完成: cat=$category, ext=$cleanExt")
     }
 
     /** 清除某个类别的默认程序 */
-    suspend fun clear(category: String) {
+    suspend fun clear(category: String, ext: String? = null) {
+        val cleanExt = ext?.trim()?.removePrefix(".")?.lowercase()
         context.defaultAppStore.edit { p ->
             val current = p[key]?.let { decode(it) } ?: emptyMap()
-            val updated = current - category
-            p[key] = encode(updated)
+            val mutable = current.toMutableMap()
+            mutable.remove(category)
+            if (!cleanExt.isNullOrEmpty()) {
+                mutable.remove(cleanExt)
+            }
+            p[key] = encode(mutable)
         }
     }
 

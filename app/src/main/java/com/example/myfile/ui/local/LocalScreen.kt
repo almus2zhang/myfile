@@ -800,7 +800,8 @@ fun LocalScreen(
                                         }
                                         intent.putExtra("return_result", true)
                                     }
-                                    val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                    val ext = entry.name.substringAfterLast('.', "").lowercase()
+                                    val defaultApp = MyApp.instance.defaultAppStore.get(category, ext)
                                     if (!forceChooser && defaultApp != null) {
                                         val parts = defaultApp.split('/')
                                         if (parts.size == 2) {
@@ -902,7 +903,10 @@ fun LocalScreen(
             onDismiss = { openWithRequest = null },
             onSelect = { candidate, always ->
                 scope.launch {
-                    if (always) FileOpener.setDefault(req.category, candidate)
+                    if (always) {
+                        val ext = req.entry.name.substringAfterLast('.', "").lowercase()
+                        FileOpener.setDefault(req.category, candidate, ext)
+                    }
                     val explicit = Intent(req.intent).apply { component = candidate.component; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv() }
                     currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
                     try { externalLauncher.launch(explicit) } catch (e: Exception) { FileOpener.openWith(dialogContext, req.intent, candidate) }

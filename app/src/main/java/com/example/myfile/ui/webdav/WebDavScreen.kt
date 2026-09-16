@@ -1580,7 +1580,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             }
                                             intent.putExtra("return_result", true)
 
-                                            val defaultApp = MyApp.instance.defaultAppStore.get(category)
+                                            val defaultApp = MyApp.instance.defaultAppStore.get(category, ext)
                                             if (!forceChooser && defaultApp != null) {
                                                 val parts = defaultApp.split('/')
                                                 if (parts.size == 2) {
@@ -1616,33 +1616,55 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             val isAccelerated = acc.renameToVideoExt && (category == "apk" || entry.size > 5 * 1024 * 1024L)
 
                                             fun doOpenLocal(file: File) {
-                                                if (category == "apk") {
-                                                    ApkInstaller.install(context, file)
-                                                    return
-                                                }
-                                                val intent = FileOpener.buildLocalViewIntent(appCtx, file) ?: return
-                                                val candidates = FileOpener.resolveCandidates(appCtx, intent)
-                                                if (!forceChooser && candidates.size == 1) {
-                                                    val explicit = Intent(intent).apply {
-                                                        component = candidates[0].component
-                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                scope.launch doOpen@ {
+                                                    if (category == "apk") {
+                                                        ApkInstaller.install(context, file)
+                                                        return@doOpen
                                                     }
-                                                    try {
-                                                        externalLauncher.launch(explicit)
-                                                        return
-                                                    } catch (_: Exception) {}
-                                                }
-                                                if (candidates.isNotEmpty()) {
-                                                    openWithRequest = OpenWithRequest(
-                                                        entry = entry,
-                                                        category = category,
-                                                        videoKey = null,
-                                                        intent = intent,
-                                                        candidates = candidates
-                                                    )
-                                                } else {
-                                                    FileOpener.open(context, file)
+                                                    val intent = FileOpener.buildLocalViewIntent(appCtx, file) ?: return@doOpen
+                                                    val candidates = FileOpener.resolveCandidates(appCtx, intent)
+                                                    val fileExt = file.name.substringAfterLast('.', "").lowercase().ifBlank { ext }
+                                                    val defaultApp = MyApp.instance.defaultAppStore.get(category, fileExt)
+                                                    if (!forceChooser && defaultApp != null) {
+                                                        val parts = defaultApp.split('/')
+                                                        if (parts.size == 2) {
+                                                            val explicit = Intent(intent).apply {
+                                                                component = ComponentName(parts[0], parts[1])
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                            }
+                                                            currentWatchingVideoKey = null
+                                                            try {
+                                                                externalLauncher.launch(explicit)
+                                                                return@doOpen
+                                                            } catch (e: Exception) {
+                                                                com.example.myfile.core.TrafficMonitor.debug("打开默认应用异常: ${e.message}")
+                                                            }
+                                                        }
+                                                    }
+                                                    if (!forceChooser && candidates.size == 1) {
+                                                        val explicit = Intent(intent).apply {
+                                                            component = candidates[0].component
+                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                        }
+                                                        currentWatchingVideoKey = null
+                                                        try {
+                                                            externalLauncher.launch(explicit)
+                                                            return@doOpen
+                                                        } catch (_: Exception) {}
+                                                    }
+                                                    if (candidates.isNotEmpty()) {
+                                                        openWithRequest = OpenWithRequest(
+                                                            entry = entry,
+                                                            category = category,
+                                                            videoKey = null,
+                                                            intent = intent,
+                                                            candidates = candidates
+                                                        )
+                                                    } else {
+                                                        FileOpener.open(context, file)
+                                                    }
                                                 }
                                             }
 
@@ -2052,9 +2074,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                 com.example.myfile.core.TrafficMonitor.debug("选择应用: ${candidate.packageName}/${candidate.activityName}, always=$always")
                 if (always) {
                     MyApp.instance.appScope.launch {
-                        com.example.myfile.core.TrafficMonitor.debug("写入默认开始: ${req.category}")
-                        FileOpener.setDefault(req.category, candidate)
-                        com.example.myfile.core.TrafficMonitor.debug("写入默认完成: ${req.category}")
+                        val ext = req.entry.name.substringAfterLast('.', "").lowercase()
+                        com.example.myfile.core.TrafficMonitor.debug("写入默认开始: ${req.category}, ext=$ext")
+                        FileOpener.setDefault(req.category, candidate, ext)
+                        com.example.myfile.core.TrafficMonitor.debug("写入默认完成: ${req.category}, ext=$ext")
                     }
                 }
                 scope.launch {
