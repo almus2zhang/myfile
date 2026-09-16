@@ -2170,7 +2170,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 if (isRemoteNewer) {
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "更新",
+                                        text = "时间更新",
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
                                     )
@@ -2200,7 +2200,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 if (isLocalNewer) {
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = "更新",
+                                        text = "时间更新",
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
                                     )
@@ -2245,6 +2245,21 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         ) {
                             Text(if (req.isApk) "安装本地" else "打开本地")
                         }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val action = req.onReDownload
+                                existingFileRequest = null
+                                action()
+                            }
+                        ) {
+                            Text("重新下载")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         FilledTonalButton(
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -2255,26 +2270,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         ) {
                             Text("本地上传")
                         }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TextButton(
+                        OutlinedButton(
                             modifier = Modifier.weight(1f),
                             onClick = { existingFileRequest = null }
                         ) {
                             Text("取消")
-                        }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                val action = req.onReDownload
-                                existingFileRequest = null
-                                action()
-                            }
-                        ) {
-                            Text("重新下载")
                         }
                     }
                 }
