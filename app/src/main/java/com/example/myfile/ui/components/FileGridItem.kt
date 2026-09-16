@@ -32,6 +32,7 @@ fun FileGridItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    hasLocalCache: Boolean = false,
     thumbnailUrl: Any? = null,
     thumbnailAuth: String? = null,
     thumbnailKey: String? = null,
@@ -84,65 +85,77 @@ fun FileGridItem(
                 val cKey = thumbnailKey ?: "thumb_${entry.path}"
                 var isLoaded by remember(thumbnailUrl, cKey) { mutableStateOf(false) }
 
-                Box(
-                    modifier = Modifier
-                        .size(iconBoxSize)
-                        .clip(RoundedCornerShape(if (isApk) 10.dp else 8.dp))
-                        .background(
-                            if (isApk) {
-                                if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.15f)
-                            } else if (hasThumbnail && thumbnailUrl != null) MaterialTheme.colorScheme.surfaceVariant
-                            else visualType.tintColor.copy(alpha = 0.15f)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (!isLoaded) {
-                        Icon(
-                            imageVector = visualType.icon,
-                            contentDescription = null,
-                            tint = visualType.tintColor,
-                            modifier = Modifier.size(iconSize)
-                        )
-                    }
-
-                    if (hasThumbnail && thumbnailUrl != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                                .data(thumbnailUrl)
-                                .memoryCacheKey(cKey)
-                                .diskCacheKey(cKey)
-                                .apply {
-                                    if (thumbnailAuth != null) addHeader("Authorization", thumbnailAuth)
-                                    if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
-                                }
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = entry.name,
-                            contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
-                            onSuccess = { isLoaded = true },
-                            onError = { isLoaded = false },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(if (isApk) 2.dp else 0.dp)
-                        )
-                    }
-
-                    // 视频总时长微底衬标签
-                    if (visualType == VisualType.VIDEO && videoDurationMs != null && videoDurationMs > 0L) {
-                        Surface(
-                            shape = RoundedCornerShape(3.dp),
-                            color = Color.Black.copy(alpha = 0.70f),
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(2.dp)
-                        ) {
-                            Text(
-                                text = formatDuration(videoDurationMs),
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 0.5.dp)
+                Box(modifier = Modifier.size(iconBoxSize)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(if (isApk) 10.dp else 8.dp))
+                            .background(
+                                if (isApk) {
+                                    if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.15f)
+                                } else if (hasThumbnail && thumbnailUrl != null) MaterialTheme.colorScheme.surfaceVariant
+                                else visualType.tintColor.copy(alpha = 0.15f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!isLoaded) {
+                            Icon(
+                                imageVector = visualType.icon,
+                                contentDescription = null,
+                                tint = visualType.tintColor,
+                                modifier = Modifier.size(iconSize)
                             )
                         }
+
+                        if (hasThumbnail && thumbnailUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                    .data(thumbnailUrl)
+                                    .memoryCacheKey(cKey)
+                                    .diskCacheKey(cKey)
+                                    .apply {
+                                        if (thumbnailAuth != null) addHeader("Authorization", thumbnailAuth)
+                                        if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
+                                    }
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = entry.name,
+                                contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                                onSuccess = { isLoaded = true },
+                                onError = { isLoaded = false },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(if (isApk) 2.dp else 0.dp)
+                            )
+                        }
+
+                        // 视频总时长微底衬标签
+                        if (visualType == VisualType.VIDEO && videoDurationMs != null && videoDurationMs > 0L) {
+                            Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = Color.Black.copy(alpha = 0.70f),
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(2.dp)
+                            ) {
+                                Text(
+                                    text = formatDuration(videoDurationMs),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 0.5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (hasLocalCache) {
+                        LocalCacheBadge(
+                            badgeSize = if (isLarge) 17.dp else 14.dp,
+                            iconSize = if (isLarge) 11.dp else 9.dp,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .offset(x = (-2).dp, y = 2.dp)
+                        )
                     }
                 }
 

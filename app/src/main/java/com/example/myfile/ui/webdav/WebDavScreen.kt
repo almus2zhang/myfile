@@ -84,6 +84,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     var downloadingApkFileName by remember { mutableStateOf("") }
     var downloadingIsAccelerated by remember { mutableStateOf(true) }
     var downloadingOnComplete by remember { mutableStateOf<((java.io.File) -> Unit)?>(null) }
+    var localCacheVersion by remember { mutableStateOf(0) }
     var pendingUnlockAccount by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     var pendingUnlockForEdit by remember { mutableStateOf<com.example.myfile.model.WebDavAccount?>(null) }
     // 三点菜单及 Dialog
@@ -113,6 +114,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
             kotlinx.coroutines.delay(180)
             pullRefreshState.endRefresh()
             refreshRotation.snapTo(0f)
+            localCacheVersion++
         }
     }
 
@@ -1408,6 +1410,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             ViewMode.COMPACT -> GridCells.Adaptive(minSize = 300.dp)
                         }
 
+                        val downloadsDir = remember {
+                            File(
+                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                "myfile"
+                            )
+                        }
+
                         LazyVerticalGrid(
                             columns = gridCells,
                             state = gridState,
@@ -1427,6 +1436,23 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             modifier = Modifier.fillMaxSize()
                         ) {
                             items(displayEntries, key = { it.path }) { entry: FileEntry ->
+                                val hasLocalCache = remember(entry.path, entry.size, entry.lastModified, pullRefreshState.isRefreshing, localCacheVersion) {
+                                    if (entry.isDirectory) false
+                                    else {
+                                        val localFile = File(downloadsDir, entry.name)
+                                        if (!localFile.exists()) false
+                                        else {
+                                            val sameSize = (entry.size >= 0L && localFile.length() == entry.size)
+                                            val sameTime = if (entry.lastModified > 0L && localFile.lastModified() > 0L) {
+                                                Math.abs(localFile.lastModified() - entry.lastModified) < 2000L
+                                            } else {
+                                                entry.size > 0L && localFile.length() == entry.size
+                                            }
+                                            sameSize && sameTime
+                                        }
+                                    }
+                                }
+
                                 val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
                                 val fullUrl = base + p
                                 val category = FileOpener.fileCategory(entry.name)
@@ -1454,6 +1480,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     vm.uploadLocalFile(localFile, remotePath) { success ->
                                         if (success) {
                                             android.widget.Toast.makeText(context, "本地文件已成功上传并覆盖远程", android.widget.Toast.LENGTH_SHORT).show()
+                                            localCacheVersion++
                                         } else {
                                             android.widget.Toast.makeText(context, "上传本地文件失败，请检查网络或权限", android.widget.Toast.LENGTH_LONG).show()
                                         }
@@ -1492,6 +1519,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 if (entryToDownload.lastModified > 0L) {
                                                     try { downloadedFile.setLastModified(entryToDownload.lastModified) } catch (_: Exception) {}
                                                 }
+                                                localCacheVersion++
                                                 onComplete?.invoke(downloadedFile)
                                             }
                                             downloadingApkTaskId = taskId
@@ -2014,6 +2042,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 videoDurationMs = durMs,
                                                 videoPositionMs = posMs,
                                                 isSelected = entry.path in state.selected,
+                                                hasLocalCache = hasLocalCache,
                                                 parentPath = itemParentPath,
                                                 onClick = onItemClick,
                                                 onLongClick = onItemLongClick,
@@ -2027,6 +2056,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             onClick = onItemClick,
                                             onLongClick = onItemLongClick,
                                             isSelected = entry.path in state.selected,
+                                            hasLocalCache = hasLocalCache,
                                             thumbnailUrl = thumbUrl,
                                             thumbnailAuth = auth,
                                             thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
@@ -2044,6 +2074,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             onClick = onItemClick,
                                             onLongClick = onItemLongClick,
                                             isSelected = entry.path in state.selected,
+                                            hasLocalCache = hasLocalCache,
                                             thumbnailUrl = thumbUrl,
                                             thumbnailAuth = auth,
                                             thumbnailKey = acc?.let { "thumb_${it.id}_${entry.path}" } ?: "thumb_${entry.path}",
@@ -2061,6 +2092,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             onClick = onItemClick,
                                             onLongClick = onItemLongClick,
                                             isSelected = entry.path in state.selected,
+                                            hasLocalCache = hasLocalCache,
                                             parentPath = itemParentPath,
                                             trailing = trailingMenu
                                         )

@@ -1,10 +1,12 @@
 package com.example.myfile.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -42,6 +44,7 @@ fun FileListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    hasLocalCache: Boolean = false,
     thumbnailUrl: Any? = null,
     thumbnailAuth: String? = null,
     thumbnailKey: String? = null,
@@ -70,106 +73,118 @@ fun FileListItem(
             visualType == VisualType.VIDEO ||
             visualType == VisualType.APK
         )
-        if (hasThumbnail && thumbnailUrl != null) {
-            val isApk = visualType == VisualType.APK
-            val cKey = thumbnailKey ?: "thumb_${entry.path}"
-            var isLoaded by remember(thumbnailUrl, cKey) { mutableStateOf(false) }
+        Box(modifier = Modifier.size(46.dp)) {
+            if (hasThumbnail && thumbnailUrl != null) {
+                val isApk = visualType == VisualType.APK
+                val cKey = thumbnailKey ?: "thumb_${entry.path}"
+                var isLoaded by remember(thumbnailUrl, cKey) { mutableStateOf(false) }
 
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
-                    .background(
-                        if (isApk) {
-                            if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.14f)
-                        } else MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                // 仅在未加载成功时显示底层默认彩色类别图标（加载中或失败时显示，避免与真实图标重叠）
-                if (!isLoaded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
+                        .background(
+                            if (isApk) {
+                                if (isLoaded) Color.Transparent else visualType.tintColor.copy(alpha = 0.14f)
+                            } else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // 仅在未加载成功时显示底层默认彩色类别图标（加载中或失败时显示，避免与真实图标重叠）
+                    if (!isLoaded) {
+                        Icon(
+                            imageVector = visualType.icon,
+                            contentDescription = null,
+                            tint = visualType.tintColor,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    // 顶层：Coil 异步加载图片、视频与 APK 真实缩略图
+                    AsyncImage(
+                        model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            .data(thumbnailUrl)
+                            .memoryCacheKey(cKey)
+                            .diskCacheKey(cKey)
+                            .apply {
+                                if (thumbnailAuth != null) {
+                                    addHeader("Authorization", thumbnailAuth)
+                                }
+                                if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
+                            }
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = entry.name,
+                        contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
+                        onSuccess = { isLoaded = true },
+                        onError = { isLoaded = false },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
+                            .padding(if (isApk) 2.dp else 0.dp)
+                    )
+
+                    // 柔和微边框，增强在浅色/深色背景下的视觉边界感
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
+                            .border(
+                                width = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                shape = RoundedCornerShape(if (isApk) 12.dp else 10.dp)
+                            )
+                    )
+
+                    if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { videoProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.5.dp)
+                                .align(Alignment.BottomCenter),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color.Black.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            } else {
+                // 质感卡片底衬徽章
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(visualType.tintColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = visualType.icon,
                         contentDescription = null,
                         tint = visualType.tintColor,
                         modifier = Modifier.size(26.dp)
                     )
-                }
-
-                // 顶层：Coil 异步加载图片、视频与 APK 真实缩略图
-                AsyncImage(
-                    model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                        .data(thumbnailUrl)
-                        .memoryCacheKey(cKey)
-                        .diskCacheKey(cKey)
-                        .apply {
-                            if (thumbnailAuth != null) {
-                                addHeader("Authorization", thumbnailAuth)
-                            }
-                            if (visualType == VisualType.VIDEO) videoFrameMillis(1000)
-                        }
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = entry.name,
-                    contentScale = if (isApk) ContentScale.Fit else ContentScale.Crop,
-                    onSuccess = { isLoaded = true },
-                    onError = { isLoaded = false },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
-                        .padding(if (isApk) 2.dp else 0.dp)
-                )
-
-                // 柔和微边框，增强在浅色/深色背景下的视觉边界感
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(if (isApk) 12.dp else 10.dp))
-                        .border(
-                            width = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(if (isApk) 12.dp else 10.dp)
+                    if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { videoProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .align(Alignment.BottomCenter),
+                            color = visualType.tintColor,
+                            trackColor = visualType.tintColor.copy(alpha = 0.2f)
                         )
-                )
-
-                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
-                    LinearProgressIndicator(
-                        progress = { videoProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.5.dp)
-                            .align(Alignment.BottomCenter),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color.Black.copy(alpha = 0.5f)
-                    )
+                    }
                 }
             }
-        } else {
-            // 质感卡片底衬徽章
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(visualType.tintColor.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = visualType.icon,
-                    contentDescription = null,
-                    tint = visualType.tintColor,
-                    modifier = Modifier.size(26.dp)
+
+            if (hasLocalCache) {
+                LocalCacheBadge(
+                    badgeSize = 15.dp,
+                    iconSize = 9.5.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset(x = (-2).dp, y = 2.dp)
                 )
-                if (visualType == VisualType.VIDEO && videoProgress != null && videoProgress > 0f) {
-                    LinearProgressIndicator(
-                        progress = { videoProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .align(Alignment.BottomCenter),
-                        color = visualType.tintColor,
-                        trackColor = visualType.tintColor.copy(alpha = 0.2f)
-                    )
-                }
             }
         }
 
@@ -339,4 +354,32 @@ fun formatDuration(ms: Long): String {
         String.format(Locale.US, "%02d:%02d", min, sec)
     }
 }
+
+/**
+ * 本地已存在同名同大小同时间文件缓存徽章（小软盘标记）
+ */
+@Composable
+fun LocalCacheBadge(
+    modifier: Modifier = Modifier,
+    badgeSize: androidx.compose.ui.unit.Dp = 15.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 9.5.dp
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+        border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        modifier = modifier.size(badgeSize)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Filled.Save,
+                contentDescription = "本地已有缓存",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(iconSize)
+            )
+        }
+    }
+}
+
 

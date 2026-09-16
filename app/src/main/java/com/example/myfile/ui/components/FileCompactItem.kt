@@ -30,6 +30,7 @@ fun FileCompactItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    hasLocalCache: Boolean = false,
     parentPath: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
@@ -46,12 +47,23 @@ fun FileCompactItem(
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = visualType.icon,
-            contentDescription = null,
-            tint = visualType.tintColor,
-            modifier = Modifier.size(24.dp)
-        )
+        Box(modifier = Modifier.size(24.dp)) {
+            Icon(
+                imageVector = visualType.icon,
+                contentDescription = null,
+                tint = visualType.tintColor,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (hasLocalCache) {
+                LocalCacheBadge(
+                    badgeSize = 12.dp,
+                    iconSize = 7.5.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset(x = (-2).dp, y = 2.dp)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.width(10.dp))
 
