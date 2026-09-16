@@ -72,6 +72,7 @@ import java.io.File
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, kotlinx.coroutines.DelicateCoroutinesApi::class)
 @Composable
 fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Unit = {}) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by vm.state.collectAsState()
     val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -196,6 +197,61 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var lastProcessedTrigger by remember { mutableStateOf(0) }
 
+    fun startUploadLocalProcess(localFile: File, remotePath: String) {
+        android.widget.Toast.makeText(context, "正在上传本地文件到 WebDAV...", android.widget.Toast.LENGTH_SHORT).show()
+        vm.uploadLocalFile(localFile, remotePath) { success ->
+            if (success) {
+                android.widget.Toast.makeText(context, "本地文件已成功上传并覆盖远程", android.widget.Toast.LENGTH_SHORT).show()
+                localCacheVersion++
+            } else {
+                android.widget.Toast.makeText(context, "上传本地文件失败，请检查网络或权限", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun startDownloadProcess(
+        entryToDownload: FileEntry,
+        isAccelerated: Boolean,
+        forceRename: Boolean = false,
+        disableRename: Boolean = false,
+        onComplete: ((File) -> Unit)? = null
+    ) {
+        val acc = state.currentAccount ?: return
+        scope.launch {
+            try {
+                com.example.myfile.core.download.DownloadService.start(MyApp.instance)
+                val dir = File(
+                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                    "myfile"
+                )
+                if (!dir.exists()) dir.mkdirs()
+                val taskId = MyApp.instance.downloadManager.startDownload(
+                    acc,
+                    entryToDownload.path,
+                    entryToDownload.name,
+                    dir,
+                    knownSize = entryToDownload.size,
+                    forceRename = forceRename,
+                    disableRename = disableRename,
+                    remoteLastModified = entryToDownload.lastModified
+                )
+                downloadingApkFileName = entryToDownload.name
+                downloadingIsAccelerated = isAccelerated
+                downloadingOnComplete = { downloadedFile ->
+                    if (entryToDownload.lastModified > 0L) {
+                        try { downloadedFile.setLastModified(entryToDownload.lastModified) } catch (_: Exception) {}
+                    }
+                    localCacheVersion++
+                    onComplete?.invoke(downloadedFile)
+                }
+                downloadingApkTaskId = taskId
+            } catch (e: Exception) {
+                val label = if (isAccelerated) "加速下载" else "下载"
+                snackbarHostState.showSnackbar("启动${label}失败: ${e.message}")
+            }
+        }
+    }
+
     // 缩略图与时长是否启用：简洁视图不显示；其余视图受 showThumbnailsAndDuration 控制
     val shouldLoadMedia = showThumbnailsAndDuration && (viewMode != ViewMode.COMPACT)
 
@@ -268,8 +324,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
             }
         }
     }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         vm.userMessage.collect { msg: String ->
@@ -1472,64 +1526,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
                                 val durMs = if (shouldLoadMedia) vProg?.durationMs else null
                                 val posMs = if (shouldLoadMedia) vProg?.positionMs else null
-
-                                // 打开文件逻辑
                                 // 打开文件逻辑与下载逻辑
-                                fun startUploadLocalProcess(localFile: File, remotePath: String) {
-                                    android.widget.Toast.makeText(context, "正在上传本地文件到 WebDAV...", android.widget.Toast.LENGTH_SHORT).show()
-                                    vm.uploadLocalFile(localFile, remotePath) { success ->
-                                        if (success) {
-                                            android.widget.Toast.makeText(context, "本地文件已成功上传并覆盖远程", android.widget.Toast.LENGTH_SHORT).show()
-                                            localCacheVersion++
-                                        } else {
-                                            android.widget.Toast.makeText(context, "上传本地文件失败，请检查网络或权限", android.widget.Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                }
-
-                                fun startDownloadProcess(
-                                    entryToDownload: FileEntry,
-                                    isAccelerated: Boolean,
-                                    forceRename: Boolean = false,
-                                    disableRename: Boolean = false,
-                                    onComplete: ((File) -> Unit)? = null
-                                ) {
-                                    if (acc == null) return
-                                    scope.launch {
-                                        try {
-                                            com.example.myfile.core.download.DownloadService.start(MyApp.instance)
-                                            val dir = File(
-                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                                                "myfile"
-                                            )
-                                            if (!dir.exists()) dir.mkdirs()
-                                            val taskId = MyApp.instance.downloadManager.startDownload(
-                                                acc,
-                                                entryToDownload.path,
-                                                entryToDownload.name,
-                                                dir,
-                                                knownSize = entryToDownload.size,
-                                                forceRename = forceRename,
-                                                disableRename = disableRename,
-                                                remoteLastModified = entryToDownload.lastModified
-                                            )
-                                            downloadingApkFileName = entryToDownload.name
-                                            downloadingIsAccelerated = isAccelerated
-                                            downloadingOnComplete = { downloadedFile ->
-                                                if (entryToDownload.lastModified > 0L) {
-                                                    try { downloadedFile.setLastModified(entryToDownload.lastModified) } catch (_: Exception) {}
-                                                }
-                                                localCacheVersion++
-                                                onComplete?.invoke(downloadedFile)
-                                            }
-                                            downloadingApkTaskId = taskId
-                                        } catch (e: Exception) {
-                                            val label = if (isAccelerated) "加速下载" else "下载"
-                                            snackbarHostState.showSnackbar("启动${label}失败: ${e.message}")
-                                        }
-                                    }
-                                }
-
                                 fun openEntry(forceChooser: Boolean, bypassExistingCheck: Boolean = false) {
                                     if (acc == null) return
                                     scope.launch {
@@ -2503,13 +2500,55 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     // 属性对话框
     propertiesEntry?.let { entry ->
         val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
-        val videoKey = state.currentAccount?.let { "acc_${it.id}$p" } ?: entry.path
+        val acc = state.currentAccount
+        val videoKey = acc?.let { "acc_${it.id}$p" } ?: entry.path
         val vProg = progressMap[videoKey]
+        val category = FileOpener.fileCategory(entry.name)
+        val downloadsDir = remember {
+            File(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                "myfile"
+            )
+        }
+        val localFile = remember(entry.name, localCacheVersion) { File(downloadsDir, entry.name) }
+        val threshold = acc?.renameThresholdBytes ?: (5L * 1024 * 1024L)
+        val isAccelerated = (acc?.renameToVideoExt == true) && (category == "apk" || entry.size >= threshold)
+        val downloadHint = if (isAccelerated) "加速" else "普通"
+
         com.example.myfile.ui.components.FilePropertiesDialog(
             entry = entry,
-            accountName = state.currentAccount?.name,
+            accountName = acc?.name,
             videoDurationMs = vProg?.durationMs,
             videoPositionMs = vProg?.positionMs,
+            localFile = localFile,
+            downloadHint = downloadHint,
+            onDownload = if (!entry.isDirectory) {
+                {
+                    val targetEntry = entry
+                    propertiesEntry = null
+                    if (localFile.exists()) {
+                        try { localFile.delete() } catch (_: Exception) {}
+                    }
+                    startDownloadProcess(
+                        entryToDownload = targetEntry,
+                        isAccelerated = isAccelerated,
+                        forceRename = isAccelerated,
+                        disableRename = !isAccelerated
+                    )
+                }
+            } else null,
+            onUpload = if (!entry.isDirectory) {
+                {
+                    val targetEntry = entry
+                    val f = localFile
+                    propertiesEntry = null
+                    if (f.exists()) {
+                        startUploadLocalProcess(f, targetEntry.path)
+                    } else {
+                        android.widget.Toast.makeText(context, "本地缓存文件不存在，无法上传", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else null,
             onDismiss = { propertiesEntry = null }
         )
     }
