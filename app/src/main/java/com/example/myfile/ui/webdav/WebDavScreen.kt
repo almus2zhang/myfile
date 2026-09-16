@@ -2125,6 +2125,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                 downloadingOnComplete = null
                 scope.launch {
                     MyApp.instance.downloadManager.cancel(idToCancel)
+                    vm.refresh()
                 }
             },
             onComplete = downloadingOnComplete

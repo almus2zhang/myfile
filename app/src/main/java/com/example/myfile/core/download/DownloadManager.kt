@@ -25,6 +25,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -42,8 +44,12 @@ class DownloadManager(
     private val taskDao: DownloadTaskDao = db.downloadTaskDao()
     private val chunkDao: ChunkRecordDao = db.chunkRecordDao()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val runningTasks = mutableMapOf<Long, kotlinx.coroutines.Job>()
-    private val mutex = Mutex()
+    private data class RunningTaskInfo(
+        val job: kotlinx.coroutines.Job,
+        val clients: List<WebDavClient>,
+        val cleanup: suspend () -> Unit
+    )
+    private val runningTasks = java.util.concurrent.ConcurrentHashMap<Long, RunningTaskInfo>()
     private val renamePrefs = context.getSharedPreferences("download_pending_renames", Context.MODE_PRIVATE)
     private val taskLastModifiedMap = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
@@ -173,15 +179,9 @@ class DownloadManager(
             taskLastModifiedMap[taskId] = fileTime
         }
         launchEngine(taskId, account, downloadPath, localFile, totalBytes) {
-            // 下载结束后（无论成败），把服务器端文件改回原名，并清理持久化记录
+            // 下载结束后（无论成败、取消），把服务器端文件改回原名，并清理持久化记录
             if (shouldRename && downloadPath != remotePath) {
-                try {
-                    client.move(downloadPath, remotePath)
-                    removePendingRename(downloadPath)
-                    DownloadLog.log(TAG, "rename back: $downloadPath -> $remotePath")
-                } catch (e: Exception) {
-                    DownloadLog.log(TAG, "rename back failed: ${e.message}")
-                }
+                restoreRemoteFile(account, downloadPath, remotePath)
             }
         }
         return@withContext taskId
@@ -346,21 +346,31 @@ class DownloadManager(
     suspend fun restoreRemoteFile(
         account: com.example.myfile.model.WebDavAccount,
         tmpPath: String,
-        originalPath: String
-    ): Boolean = withContext(Dispatchers.IO) {
+        originalPath: String,
+        maxRetries: Int = 5
+    ): Boolean = withContext(NonCancellable + Dispatchers.IO) {
         if (tmpPath == originalPath) return@withContext true
         val client = clientProvider(account)
-        try {
-            val ok = client.move(tmpPath, originalPath)
-            if (ok) {
-                removePendingRename(tmpPath)
-                DownloadLog.log(TAG, "restore remote file: $tmpPath -> $originalPath")
+        try { client.cancelAll() } catch (_: Exception) {}
+        var ok = false
+        for (attempt in 1..maxRetries) {
+            try {
+                ok = client.move(tmpPath, originalPath)
+                if (ok) {
+                    removePendingRename(tmpPath)
+                    DownloadLog.log(TAG, "restore remote file success (attempt $attempt): $tmpPath -> $originalPath")
+                    break
+                } else {
+                    DownloadLog.log(TAG, "restore remote file returned false (attempt $attempt): $tmpPath -> $originalPath")
+                }
+            } catch (e: Exception) {
+                DownloadLog.log(TAG, "restore remote file exception (attempt $attempt): ${e.message}")
             }
-            ok
-        } catch (e: Exception) {
-            DownloadLog.log(TAG, "restore remote file failed: ${e.message}")
-            false
+            if (attempt < maxRetries) {
+                delay(200L * attempt)
+            }
         }
+        ok
     }
 
     /** 生成一个 .avi 后缀的临时远程路径（同目录、唯一名，避免覆盖已有文件） */
@@ -381,8 +391,22 @@ class DownloadManager(
         remotePath: String,
         localFile: File,
         totalBytes: Long,
-        onFinished: (() -> Unit)? = null
+        onFinished: (suspend () -> Unit)? = null
     ) {
+        val clients = account.allUrls().map { url ->
+            clientProvider(account.copy(url = url))
+        }
+        var cleanedUp = false
+        val cleanupAction: suspend () -> Unit = {
+            if (!cleanedUp) {
+                cleanedUp = true
+                try { clients.forEach { it.cancelAll() } } catch (_: Exception) {}
+                try { onFinished?.invoke() } catch (e: Exception) {
+                    DownloadLog.log(TAG, "cleanup error: ${e.message}")
+                }
+            }
+        }
+
         val job = scope.launch {
             try {
                 taskDao.updateStatus(taskId, TransferStatus.DOWNLOADING.name, null)
@@ -396,10 +420,6 @@ class DownloadManager(
                     singleConnectionMode = settings.singleConnectionMode,
                     streamPulseMode = settings.streamPulseMode
                 )
-                // 构建多个 client（主地址 + 备用端口），用于轮换绕过限速
-                val clients = account.allUrls().map { url ->
-                    clientProvider(account.copy(url = url))
-                }
                 DownloadLog.log(TAG, "download with ${clients.size} clients (ports: ${clients.map { portOfUrl(it) }}) mode=${if (config.singleConnectionMode) "single" else "parallel"}")
                 val client = clients.first()
 
@@ -436,16 +456,18 @@ class DownloadManager(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "download failed", e)
-                taskDao.updateStatus(taskId, TransferStatus.FAILED.name, e.message)
-            } finally {
-                try { onFinished?.invoke() } catch (e: Exception) {
-                    DownloadLog.log(TAG, "onFinished error: ${e.message}")
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "download failed", e)
+                    taskDao.updateStatus(taskId, TransferStatus.FAILED.name, e.message)
                 }
-                mutex.withLock { runningTasks.remove(taskId) }
+            } finally {
+                withContext(NonCancellable) {
+                    runningTasks.remove(taskId)
+                    cleanupAction()
+                }
             }
         }
-        scope.launch { mutex.withLock { runningTasks[taskId] = job } }
+        runningTasks[taskId] = RunningTaskInfo(job, clients, cleanupAction)
     }
 
     private fun applyRemoteTimestamp(taskId: Long, localFile: File) {
@@ -492,10 +514,13 @@ class DownloadManager(
         taskDao.markCompleted(taskId)
     }
 
-    suspend fun pause(taskId: Long) {
-        runningTasks[taskId]?.cancel()
-        mutex.withLock { runningTasks.remove(taskId) }
+    suspend fun pause(taskId: Long) = withContext(NonCancellable + Dispatchers.IO) {
+        val info = runningTasks.remove(taskId)
+        info?.clients?.forEach { it.cancelAll() }
+        info?.job?.cancel()
         taskDao.updateStatus(taskId, TransferStatus.PAUSED.name, null)
+        info?.cleanup?.invoke()
+        Unit
     }
 
     suspend fun resume(taskId: Long, account: com.example.myfile.model.WebDavAccount) = withContext(Dispatchers.IO) {
@@ -529,28 +554,54 @@ class DownloadManager(
         }
         launchEngine(taskId, account, downloadPath, File(task.localPath), task.totalBytes) {
             if (shouldRename && downloadPath != task.remoteUrl) {
-                try {
-                    client.move(downloadPath, task.remoteUrl)
-                    removePendingRename(downloadPath)
-                    DownloadLog.log(TAG, "resume rename back: $downloadPath -> ${task.remoteUrl}")
-                } catch (e: Exception) {
-                    DownloadLog.log(TAG, "resume rename back failed: ${e.message}")
-                }
+                restoreRemoteFile(account, downloadPath, task.remoteUrl)
             }
         }
     }
 
-    suspend fun cancel(taskId: Long) {
+    suspend fun cancel(taskId: Long) = withContext(NonCancellable + Dispatchers.IO) {
         taskLastModifiedMap.remove(taskId)
-        runningTasks[taskId]?.cancel()
-        mutex.withLock { runningTasks.remove(taskId) }
+        val info = runningTasks.remove(taskId)
+        info?.clients?.forEach { it.cancelAll() }
+        info?.job?.cancel()
         taskDao.updateStatus(taskId, TransferStatus.CANCELED.name, null)
+        info?.cleanup?.invoke()
+
+        // 进一步兜底扫描：若仍有与该任务相关的改名残留，立即强制改回
+        try {
+            val task = taskDao.getById(taskId)
+            if (task != null) {
+                val all = renamePrefs.all
+                for ((tmpPath, value) in all) {
+                    val jsonStr = value as? String ?: continue
+                    try {
+                        val obj = org.json.JSONObject(jsonStr)
+                        val originalPath = obj.getString("originalPath")
+                        if (originalPath == task.remoteUrl || tmpPath == task.remoteUrl) {
+                            val acc = com.example.myfile.model.WebDavAccount(
+                                id = obj.optLong("accountId", 0L),
+                                name = "Recover",
+                                url = obj.getString("url"),
+                                username = obj.getString("username"),
+                                password = obj.getString("password")
+                            )
+                            restoreRemoteFile(acc, tmpPath, originalPath)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "cancel restorePendingRename error", e)
+        }
+        scanPendingRenames()
+        Unit
     }
 
-    suspend fun delete(taskId: Long) {
+    suspend fun delete(taskId: Long) = withContext(NonCancellable + Dispatchers.IO) {
         cancel(taskId)
         chunkDao.deleteByTask(taskId)
         taskDao.delete(taskId)
+        Unit
     }
 
     private fun portOfUrl(c: WebDavClient): String = try {
