@@ -1448,6 +1448,17 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
                                 // 打开文件逻辑
                                 // 打开文件逻辑与下载逻辑
+                                fun startUploadLocalProcess(localFile: File, remotePath: String) {
+                                    android.widget.Toast.makeText(context, "正在上传本地文件到 WebDAV...", android.widget.Toast.LENGTH_SHORT).show()
+                                    vm.uploadLocalFile(localFile, remotePath) { success ->
+                                        if (success) {
+                                            android.widget.Toast.makeText(context, "本地文件已成功上传并覆盖远程", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            android.widget.Toast.makeText(context, "上传本地文件失败，请检查网络或权限", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+
                                 fun startDownloadProcess(
                                     entryToDownload: FileEntry,
                                     isAccelerated: Boolean,
@@ -1646,6 +1657,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                     },
                                                     onUseLocal = {
                                                         doOpenLocal(downloadedFile)
+                                                    },
+                                                    onUploadLocal = {
+                                                        startUploadLocalProcess(downloadedFile, entry.path)
                                                     }
                                                 )
                                                 return@launch
@@ -1757,6 +1771,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                                         } else {
                                                                             FileOpener.open(context, localDownloaded)
                                                                         }
+                                                                    },
+                                                                    onUploadLocal = {
+                                                                        startUploadLocalProcess(localDownloaded, entry.path)
                                                                     }
                                                                 )
                                                             } else {
@@ -1790,6 +1807,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                                         } else {
                                                                             FileOpener.open(context, localDownloaded)
                                                                         }
+                                                                    },
+                                                                    onUploadLocal = {
+                                                                        startUploadLocalProcess(localDownloaded, entry.path)
                                                                     }
                                                                 )
                                                             } else {
@@ -2139,6 +2159,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             val isRemoteNewer = req.entry.lastModified > 0L && req.entry.lastModified > req.localFile.lastModified()
+                            val isLocalNewer = req.localFile.lastModified() > 0L && req.localFile.lastModified() > req.entry.lastModified
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "远程文件 (WebDAV):",
@@ -2169,12 +2190,22 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                             Spacer(Modifier.height(8.dp))
 
-                            Text(
-                                text = "本地已存文件 (Downloads/myfile/):",
-                                fontWeight = FontWeight.SemiBold,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "本地已存文件 (Downloads/myfile/):",
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (isLocalNewer) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "更新",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "大小: ${formatSize(req.localFile.length())}",
@@ -2188,37 +2219,67 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = if (req.isApk) "检测到本地已存在同名安装包。要直接安装本地文件，还是从 WebDAV 重新下载最新文件？"
-                        else "检测到本地已存在同名文件。要直接打开本地文件，还是从 WebDAV 重新下载最新文件？",
+                        text = if (req.isApk) "检测到本地已存在同名安装包。您可以打开/安装本地文件、上传覆盖云端，或重新从云端下载。"
+                        else "检测到本地已存在同名文件。您可以打开本地文件、上传覆盖云端，或重新从云端下载。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    val action = req.onReDownload
-                    existingFileRequest = null
-                    action()
-                }) {
-                    Text("重新下载")
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val action = req.onUseLocal
+                                existingFileRequest = null
+                                action()
+                            }
+                        ) {
+                            Text(if (req.isApk) "安装本地" else "打开本地")
+                        }
+                        FilledTonalButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val action = req.onUploadLocal
+                                existingFileRequest = null
+                                action()
+                            }
+                        ) {
+                            Text("本地上传")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = { existingFileRequest = null }
+                        ) {
+                            Text("取消")
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val action = req.onReDownload
+                                existingFileRequest = null
+                                action()
+                            }
+                        ) {
+                            Text("重新下载")
+                        }
+                    }
                 }
             },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { existingFileRequest = null }) {
-                        Text("取消")
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    OutlinedButton(onClick = {
-                        val action = req.onUseLocal
-                        existingFileRequest = null
-                        action()
-                    }) {
-                        Text(if (req.isApk) "安装本地" else "打开本地")
-                    }
-                }
-            }
+            dismissButton = null
         )
     }
 
@@ -2342,7 +2403,8 @@ private data class ExistingFileRequest(
     val localFile: File,
     val isApk: Boolean,
     val onReDownload: () -> Unit,
-    val onUseLocal: () -> Unit
+    val onUseLocal: () -> Unit,
+    val onUploadLocal: () -> Unit
 )
 
 /** 面包屑项 */

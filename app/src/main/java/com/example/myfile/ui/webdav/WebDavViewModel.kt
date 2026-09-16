@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 import com.example.myfile.model.ViewMode
 import kotlinx.coroutines.Dispatchers
@@ -308,6 +309,29 @@ class WebDavViewModel : ViewModel() {
         val acc = _state.value.currentAccount ?: return@withContext false
         val cs = try { java.nio.charset.Charset.forName(charset) } catch (_: Exception) { Charsets.UTF_8 }
         repo.upload(acc, path, content.toByteArray(cs))
+    }
+
+    /** 上传本地文件到 WebDAV 对应路径（覆盖同名文件） */
+    fun uploadLocalFile(localFile: File, remotePath: String, onDone: ((Boolean) -> Unit)? = null) {
+        val acc = _state.value.currentAccount ?: run {
+            onDone?.invoke(false)
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true)
+            var success = false
+            try {
+                success = repo.uploadFile(acc, remotePath, localFile)
+            } catch (e: Exception) {
+                android.util.Log.e("WebDavVM", "uploadLocalFile error", e)
+            } finally {
+                _state.value = _state.value.copy(loading = false)
+                if (success) {
+                    refresh()
+                }
+                onDone?.invoke(success)
+            }
+        }
     }
 
     fun toggleSelect(path: String) {
