@@ -1699,11 +1699,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                             val explicit = Intent(intent).apply {
                                                                 component = ComponentName(parts[0], parts[1])
                                                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
                                                             }
                                                             currentWatchingVideoKey = null
                                                             try {
-                                                                externalLauncher.launch(explicit)
+                                                                context.startActivity(explicit)
                                                                 return@doOpen
                                                             } catch (e: Exception) {
                                                                 com.example.myfile.core.TrafficMonitor.debug("打开默认应用异常: ${e.message}")
@@ -1714,11 +1716,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                         val explicit = Intent(intent).apply {
                                                             component = candidates[0].component
                                                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
                                                         }
                                                         currentWatchingVideoKey = null
                                                         try {
-                                                            externalLauncher.launch(explicit)
+                                                            context.startActivity(explicit)
                                                             return@doOpen
                                                         } catch (_: Exception) {}
                                                     }
@@ -2163,35 +2167,73 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                     }
                 }
                 scope.launch {
+                    val isVideo = req.category == "video"
                     val explicit = Intent(req.intent).apply {
                         component = candidate.component
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        if (isVideo) {
+                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                        } else {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                        }
                     }
-                    currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
-                    try {
-                        externalLauncher.launch(explicit)
-                    } catch (e: Exception) {
-                        MyApp.instance.downloadManager.finishStreamingRename(req.entry.path)
-                        FileOpener.openWith(context, req.intent, candidate)
+                    if (isVideo) {
+                        currentWatchingVideoKey = req.videoKey
+                        try {
+                            externalLauncher.launch(explicit)
+                        } catch (e: Exception) {
+                            MyApp.instance.downloadManager.finishStreamingRename(req.entry.path)
+                            FileOpener.openWith(context, req.intent, candidate)
+                        }
+                    } else {
+                        currentWatchingVideoKey = null
+                        try {
+                            context.startActivity(explicit)
+                        } catch (e: Exception) {
+                            FileOpener.openWith(context, req.intent, candidate)
+                        }
                     }
                 }
                 openWithRequest = null
             },
             onSystemChooser = {
+                val isVideo = req.category == "video"
                 val clean = Intent(req.intent).apply {
-                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (isVideo) {
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    } else {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                    }
                 }
                 val chooser = Intent.createChooser(clean, "打开为").apply {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (isVideo) {
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    } else {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
                 }
-                currentWatchingVideoKey = if (req.category == "video") req.videoKey else null
-                try {
-                    externalLauncher.launch(chooser)
-                } catch (e: Exception) {
-                    scope.launch { MyApp.instance.downloadManager.finishStreamingRename(req.entry.path) }
-                    FileOpener.openWithSystemChooser(context, req.intent)
+                if (isVideo) {
+                    currentWatchingVideoKey = req.videoKey
+                    try {
+                        externalLauncher.launch(chooser)
+                    } catch (e: Exception) {
+                        scope.launch { MyApp.instance.downloadManager.finishStreamingRename(req.entry.path) }
+                        FileOpener.openWithSystemChooser(context, req.intent)
+                    }
+                } else {
+                    currentWatchingVideoKey = null
+                    try {
+                        context.startActivity(chooser)
+                    } catch (e: Exception) {
+                        FileOpener.openWithSystemChooser(context, req.intent)
+                    }
                 }
                 openWithRequest = null
             }

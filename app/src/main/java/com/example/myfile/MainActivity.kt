@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent?.let { com.example.myfile.core.ShareReceiver.handleSendIntent(this, it) }
         setContent {
             MyfileTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -37,6 +38,12 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        com.example.myfile.core.ShareReceiver.handleSendIntent(this, intent)
     }
 
     private fun checkStoragePermission(): Boolean =

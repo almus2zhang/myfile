@@ -801,6 +801,7 @@ fun LocalScreen(
                                         intent.putExtra("return_result", true)
                                     }
                                     val ext = entry.name.substringAfterLast('.', "").lowercase()
+                                    val isVideo = category == "video"
                                     val defaultApp = MyApp.instance.defaultAppStore.get(category, ext)
                                     if (!forceChooser && defaultApp != null) {
                                         val parts = defaultApp.split('/')
@@ -808,20 +809,42 @@ fun LocalScreen(
                                             val explicit = Intent(intent).apply {
                                                 component = ComponentName(parts[0], parts[1])
                                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                                if (isVideo) {
+                                                    flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                } else {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                                                }
                                             }
-                                            currentWatchingVideoKey = if (category == "video") entry.path else null
-                                            try { externalLauncher.launch(explicit); return@launch } catch (_: Exception) {}
+                                            if (isVideo) {
+                                                currentWatchingVideoKey = entry.path
+                                                try { externalLauncher.launch(explicit); return@launch } catch (_: Exception) {}
+                                            } else {
+                                                currentWatchingVideoKey = null
+                                                try { context.startActivity(explicit); return@launch } catch (_: Exception) {}
+                                            }
                                         }
                                     }
                                     if (!forceChooser && candidates.size == 1) {
                                         val explicit = Intent(intent).apply {
                                             component = candidates[0].component
                                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                            if (isVideo) {
+                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                            } else {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                                            }
                                         }
-                                        currentWatchingVideoKey = if (category == "video") entry.path else null
-                                        try { externalLauncher.launch(explicit); return@launch } catch (_: Exception) {}
+                                        if (isVideo) {
+                                            currentWatchingVideoKey = entry.path
+                                            try { externalLauncher.launch(explicit); return@launch } catch (_: Exception) {}
+                                        } else {
+                                            currentWatchingVideoKey = null
+                                            try { context.startActivity(explicit); return@launch } catch (_: Exception) {}
+                                        }
                                     }
                                     openWithRequest = LocalOpenWithRequest(entry = entry, category = category, intent = intent, candidates = candidates)
                                 }
@@ -907,17 +930,56 @@ fun LocalScreen(
                         val ext = req.entry.name.substringAfterLast('.', "").lowercase()
                         FileOpener.setDefault(req.category, candidate, ext)
                     }
-                    val explicit = Intent(req.intent).apply { component = candidate.component; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv() }
-                    currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
-                    try { externalLauncher.launch(explicit) } catch (e: Exception) { FileOpener.openWith(dialogContext, req.intent, candidate) }
+                    val isVideo = req.category == "video"
+                    val explicit = Intent(req.intent).apply {
+                        component = candidate.component
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        if (isVideo) {
+                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                        } else {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                        }
+                    }
+                    if (isVideo) {
+                        currentWatchingVideoKey = req.entry.path
+                        try { externalLauncher.launch(explicit) } catch (e: Exception) { FileOpener.openWith(dialogContext, req.intent, candidate) }
+                    } else {
+                        currentWatchingVideoKey = null
+                        try { dialogContext.startActivity(explicit) } catch (e: Exception) { FileOpener.openWith(dialogContext, req.intent, candidate) }
+                    }
                 }
                 openWithRequest = null
             },
             onSystemChooser = {
-                val clean = Intent(req.intent).apply { flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv() }
-                val chooser = Intent.createChooser(clean, "打开为").apply { addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv() }
-                currentWatchingVideoKey = if (req.category == "video") req.entry.path else null
-                try { externalLauncher.launch(chooser) } catch (e: Exception) { FileOpener.openWithSystemChooser(dialogContext, req.intent) }
+                val isVideo = req.category == "video"
+                val clean = Intent(req.intent).apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (isVideo) {
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    } else {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+                    }
+                }
+                val chooser = Intent.createChooser(clean, "打开为").apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (isVideo) {
+                        flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                    } else {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                }
+                if (isVideo) {
+                    currentWatchingVideoKey = req.entry.path
+                    try { externalLauncher.launch(chooser) } catch (e: Exception) { FileOpener.openWithSystemChooser(dialogContext, req.intent) }
+                } else {
+                    currentWatchingVideoKey = null
+                    try { dialogContext.startActivity(chooser) } catch (e: Exception) { FileOpener.openWithSystemChooser(dialogContext, req.intent) }
+                }
                 openWithRequest = null
             }
         )

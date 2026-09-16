@@ -48,6 +48,9 @@ object TransferOps {
                                     src.copyTo(dst, overwrite = true)
                                 }
                             }
+                            if (src.canonicalPath.contains("shared_incoming")) {
+                                try { src.delete() } catch (_: Exception) {}
+                            }
                             successCount++
                         }
                     }
@@ -138,7 +141,7 @@ object TransferOps {
                             repo.uploadFile(targetAccount, destPath, src)
                         }
                         if (ok) {
-                            if (isCut) {
+                            if (isCut || src.canonicalPath.contains("shared_incoming")) {
                                 src.deleteRecursively()
                             }
                             successCount++
