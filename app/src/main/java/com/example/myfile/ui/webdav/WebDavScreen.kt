@@ -1518,6 +1518,74 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                         }
 
                                         if (isVid) {
+                                            val dir = File(
+                                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                                "myfile"
+                                            )
+                                            val localVideoFile = File(dir, entry.name)
+                                            val sameVideoSize = (entry.size >= 0L && localVideoFile.length() == entry.size)
+                                            val sameVideoTime = if (entry.lastModified > 0L && localVideoFile.lastModified() > 0L) {
+                                                Math.abs(localVideoFile.lastModified() - entry.lastModified) < 2000L
+                                            } else {
+                                                entry.size > 0L && localVideoFile.length() == entry.size
+                                            }
+                                            if (localVideoFile.exists() && sameVideoSize && sameVideoTime) {
+                                                com.example.myfile.core.TrafficMonitor.debug("视频本地与远程文件大小和时间一致，直接打开本地视频: ${localVideoFile.name}")
+                                                val localIntent = FileOpener.buildLocalViewIntent(appCtx, localVideoFile)
+                                                if (localIntent != null) {
+                                                    val candidates = FileOpener.resolveCandidates(appCtx, localIntent)
+                                                    val defaultApp = MyApp.instance.defaultAppStore.get(category, ext)
+                                                    val saved = MyApp.instance.db.videoProgressDao().get(localVideoFile.absolutePath)
+                                                    if (saved != null && saved.positionMs > 1000L) {
+                                                        localIntent.putExtra("position", saved.positionMs.toInt())
+                                                        localIntent.putExtra("position_ms", saved.positionMs)
+                                                        localIntent.putExtra("extra_position", saved.positionMs)
+                                                        localIntent.putExtra("time", (saved.positionMs / 1000).toInt())
+                                                        localIntent.putExtra("from_start", false)
+                                                    }
+                                                    localIntent.putExtra("return_result", true)
+                                                    if (!forceChooser && defaultApp != null) {
+                                                        val parts = defaultApp.split('/')
+                                                        if (parts.size == 2) {
+                                                            val explicit = Intent(localIntent).apply {
+                                                                component = ComponentName(parts[0], parts[1])
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                            }
+                                                            currentWatchingVideoKey = localVideoFile.absolutePath
+                                                            try {
+                                                                externalLauncher.launch(explicit)
+                                                                return@launch
+                                                            } catch (e: Exception) {
+                                                                currentWatchingVideoKey = null
+                                                            }
+                                                        }
+                                                    }
+                                                    if (!forceChooser && candidates.size == 1) {
+                                                        val explicit = Intent(localIntent).apply {
+                                                            component = candidates[0].component
+                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                                        }
+                                                        currentWatchingVideoKey = localVideoFile.absolutePath
+                                                        try {
+                                                            externalLauncher.launch(explicit)
+                                                            return@launch
+                                                        } catch (_: Exception) {}
+                                                    }
+                                                    if (candidates.isNotEmpty()) {
+                                                        openWithRequest = OpenWithRequest(
+                                                            entry = entry,
+                                                            category = category,
+                                                            videoKey = localVideoFile.absolutePath,
+                                                            intent = localIntent,
+                                                            candidates = candidates
+                                                        )
+                                                        return@launch
+                                                    }
+                                                }
+                                            }
+
                                             val intent = FileOpener.buildVideoStreamIntent(
                                                 client = com.example.myfile.MyApp.instance.okHttpClient,
                                                 account = acc,
@@ -1666,6 +1734,20 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                         FileOpener.open(context, file)
                                                     }
                                                 }
+                                            }
+
+                                            val sameSize = (entry.size >= 0L && downloadedFile.length() == entry.size)
+                                            val sameTime = if (entry.lastModified > 0L && downloadedFile.lastModified() > 0L) {
+                                                Math.abs(downloadedFile.lastModified() - entry.lastModified) < 2000L
+                                            } else {
+                                                entry.size > 0L && downloadedFile.length() == entry.size
+                                            }
+                                            val isIdentical = downloadedFile.exists() && sameSize && sameTime
+
+                                            if (isIdentical) {
+                                                com.example.myfile.core.TrafficMonitor.debug("本地与远程文件大小和时间一致，直接打开本地文件: ${downloadedFile.name}")
+                                                doOpenLocal(downloadedFile)
+                                                return@launch
                                             }
 
                                             if (!bypassExistingCheck && downloadedFile.exists()) {
