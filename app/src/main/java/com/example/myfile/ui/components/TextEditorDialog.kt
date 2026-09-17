@@ -1,6 +1,7 @@
 package com.example.myfile.ui.components
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -130,19 +131,29 @@ fun TextEditorDialog(
         }
     }
 
+    val handleBack = {
+        if (showExitConfirm) {
+            showExitConfirm = false
+        } else if (pendingEncodingSwitch != null) {
+            pendingEncodingSwitch = null
+        } else if (showEncodingMenu) {
+            showEncodingMenu = false
+        } else if (isModified) {
+            showExitConfirm = true
+        } else {
+            onDismiss()
+        }
+    }
+
     Dialog(
-        onDismissRequest = {
-            if (isModified) {
-                showExitConfirm = true
-            } else {
-                onDismiss()
-            }
-        },
+        onDismissRequest = handleBack,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            dismissOnBackPress = false
+            dismissOnBackPress = true
         )
     ) {
+        BackHandler(onBack = handleBack)
+
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
@@ -185,13 +196,7 @@ fun TextEditorDialog(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = {
-                            if (isModified) {
-                                showExitConfirm = true
-                            } else {
-                                onDismiss()
-                            }
-                        }) {
+                        IconButton(onClick = handleBack) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
                         }
                     },
