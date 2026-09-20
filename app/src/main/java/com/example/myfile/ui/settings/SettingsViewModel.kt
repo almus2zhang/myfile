@@ -63,4 +63,44 @@ class SettingsViewModel : ViewModel() {
     fun updateShowVideoDuration(enabled: Boolean) {
         viewModelScope.launch { store.update { it.copy(showVideoDuration = enabled) } }
     }
+
+    fun updateAutoCheckUpdate(enabled: Boolean) {
+        viewModelScope.launch { store.update { it.copy(autoCheckUpdate = enabled) } }
+    }
+
+    private val _isCheckingUpdate = MutableStateFlow(false)
+    val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
+
+    private val _updateInfo = MutableStateFlow<com.example.myfile.core.ota.UpdateInfo?>(null)
+    val updateInfo: StateFlow<com.example.myfile.core.ota.UpdateInfo?> = _updateInfo.asStateFlow()
+
+    private val _checkResultMsg = MutableStateFlow<String?>(null)
+    val checkResultMsg: StateFlow<String?> = _checkResultMsg.asStateFlow()
+
+    fun checkForUpdates() {
+        if (_isCheckingUpdate.value) return
+        _isCheckingUpdate.value = true
+        _checkResultMsg.value = null
+        viewModelScope.launch {
+            val res = com.example.myfile.core.ota.OtaManager.checkUpdate()
+            _isCheckingUpdate.value = false
+            res.onSuccess { info ->
+                if (info.hasUpdate) {
+                    _updateInfo.value = info
+                } else {
+                    _checkResultMsg.value = "当前已是最新版本 (v${info.versionName.ifBlank { com.example.myfile.BuildConfig.VERSION_NAME }})"
+                }
+            }.onFailure { err ->
+                _checkResultMsg.value = "检查更新失败: ${err.localizedMessage ?: "网络错误"}"
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _updateInfo.value = null
+    }
+
+    fun clearCheckResultMsg() {
+        _checkResultMsg.value = null
+    }
 }

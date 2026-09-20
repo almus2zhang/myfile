@@ -1,5 +1,6 @@
 package com.example.myfile.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,16 +9,30 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.myfile.BuildConfig
 import com.example.myfile.R
+import com.example.myfile.ui.components.OtaUpdateDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
+    val context = LocalContext.current
     val s by vm.settings.collectAsState()
+    val isCheckingUpdate by vm.isCheckingUpdate.collectAsState()
+    val updateInfo by vm.updateInfo.collectAsState()
+    val checkResultMsg by vm.checkResultMsg.collectAsState()
+
+    LaunchedEffect(checkResultMsg) {
+        checkResultMsg?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            vm.clearCheckResultMsg()
+        }
+    }
 
     val chunkOptions = listOf(
         1L * 1024 * 1024 to "1 MB",
@@ -159,6 +174,70 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 )
             }
 
+            HorizontalDivider()
+
+            // 关于与更新
+            Section(title = "关于与更新") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("当前版本", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Button(
+                                onClick = { vm.checkForUpdates() },
+                                enabled = !isCheckingUpdate
+                            ) {
+                                if (isCheckingUpdate) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("检查中...")
+                                } else {
+                                    Text("检查更新")
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("启动时自动检查更新", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "发现新版本时在主界面提示",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = s.autoCheckUpdate,
+                                onCheckedChange = { vm.updateAutoCheckUpdate(it) }
+                            )
+                        }
+                    }
+                }
+            }
+
             Card(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = stringResource(R.string.settings_hint),
@@ -168,6 +247,13 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                 )
             }
         }
+    }
+
+    updateInfo?.let { info ->
+        OtaUpdateDialog(
+            updateInfo = info,
+            onDismiss = { vm.dismissUpdateDialog() }
+        )
     }
 }
 

@@ -32,6 +32,7 @@ class MainActivity : FragmentActivity() {
                     if (hasPermission.value) {
                         AppNavigation()
                         PendingRenameDialog()
+                        OtaCheckHandler()
                     } else {
                         PermissionScreen(onGranted = { hasPermission.value = true })
                     }
@@ -133,6 +134,36 @@ private fun PendingRenameDialog() {
                     }
                 }) { Text("忽略") }
             }
+        )
+    }
+}
+
+/**
+ * 启动时后台静默检查 OTA 更新。检测到新版本时展示更新弹窗。
+ */
+@Composable
+private fun OtaCheckHandler() {
+    val settings by MyApp.instance.settingsStore.settings.collectAsState(initial = null)
+    var updateInfo by remember { mutableStateOf<com.example.myfile.core.ota.UpdateInfo?>(null) }
+    val hasChecked = remember { mutableStateOf(false) }
+
+    LaunchedEffect(settings?.autoCheckUpdate) {
+        val autoCheck = settings?.autoCheckUpdate ?: return@LaunchedEffect
+        if (autoCheck && !hasChecked.value) {
+            hasChecked.value = true
+            val res = com.example.myfile.core.ota.OtaManager.checkUpdate()
+            res.onSuccess { info ->
+                if (info.hasUpdate) {
+                    updateInfo = info
+                }
+            }
+        }
+    }
+
+    updateInfo?.let { info ->
+        com.example.myfile.ui.components.OtaUpdateDialog(
+            updateInfo = info,
+            onDismiss = { updateInfo = null }
         )
     }
 }
