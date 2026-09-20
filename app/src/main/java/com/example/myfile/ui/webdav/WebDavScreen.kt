@@ -126,8 +126,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     var showViewModeMenu by remember { mutableStateOf(false) }
     var showAccountMenu by remember { mutableStateOf(false) }
     var editingTextEntry by remember { mutableStateOf<FileEntry?>(null) }
-    var viewingZipFile by remember { mutableStateOf<File?>(null) }
-    var viewingZipTitle by remember { mutableStateOf("") }
+    var viewingArchiveFile by remember { mutableStateOf<File?>(null) }
+    var viewingArchiveTitle by remember { mutableStateOf("") }
 
     LaunchedEffect(state.sortedFiles) {
         pendingScrollRatio?.let { (ratio, offset) ->
@@ -1712,9 +1712,9 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
                                             fun doOpenLocal(file: File) {
                                                 scope.launch doOpen@ {
-                                                    if (!forceChooser && file.name.endsWith(".zip", ignoreCase = true)) {
-                                                        viewingZipFile = file
-                                                        viewingZipTitle = entry.name
+                                                    if (!forceChooser && com.example.myfile.core.ArchiveHelper.isArchive(file.name)) {
+                                                        viewingArchiveFile = file
+                                                        viewingArchiveTitle = entry.name
                                                         return@doOpen
                                                     }
                                                     if (category == "apk") {
@@ -1876,7 +1876,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 onDismissRequest = { showMenu = false }
                                             ) {
                                                 if (!entry.isDirectory) {
-                                                    if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                                                    if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {
                                                         DropdownMenuItem(
                                                             text = { Text("查看压缩包") },
                                                             leadingIcon = { Icon(Icons.Filled.FolderZip, null) },
@@ -2669,14 +2669,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         )
     }
 
-    // 内置 ZIP 压缩包浏览器
-    viewingZipFile?.let { file ->
-        com.example.myfile.ui.components.ZipViewerDialog(
-            zipFile = file,
-            title = viewingZipTitle.ifBlank { file.name },
+    // 内置多格式压缩包浏览器（ZIP, RAR, 7Z, TAR, GZ, TGZ, BZ2, XZ等）
+    viewingArchiveFile?.let { file ->
+        com.example.myfile.ui.components.ArchiveViewerDialog(
+            archiveFile = file,
+            title = viewingArchiveTitle.ifBlank { file.name },
             onDismiss = {
-                viewingZipFile = null
-                viewingZipTitle = ""
+                viewingArchiveFile = null
+                viewingArchiveTitle = ""
             }
         )
     }

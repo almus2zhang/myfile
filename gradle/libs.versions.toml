@@ -15,6 +15,9 @@ coroutines = "1.8.1"
 documentfile = "1.0.1"
 coil = "2.6.0"
 biometric = "1.1.0"
+commonsCompress = "1.26.1"
+tukaaniXz = "1.9"
+junrar = "7.5.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +42,9 @@ androidx-documentfile = { group = "androidx.documentfile", name = "documentfile"
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 coil-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
+tukaani-xz = { group = "org.tukaani", name = "xz", version.ref = "tukaaniXz" }
+junrar = { group = "com.github.junrar", name = "junrar", version.ref = "junrar" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

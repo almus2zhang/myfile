@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.myfile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 112
-        versionName = "1.2.2"
+        versionCode = 113
+        versionName = "1.2.3"
     }
 
     signingConfigs {
@@ -75,5 +75,8 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
+    implementation(libs.commons.compress)
+    implementation(libs.tukaani.xz)
+    implementation(libs.junrar)
     debugImplementation(libs.androidx.ui.tooling)
 }

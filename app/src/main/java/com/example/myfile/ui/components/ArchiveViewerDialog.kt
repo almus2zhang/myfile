@@ -1,9 +1,7 @@
 package com.example.myfile.ui.components
 
-import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -20,17 +18,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.myfile.core.ArchiveEntryItem
+import com.example.myfile.core.ArchiveHelper
 import com.example.myfile.core.FileOpener
-import com.example.myfile.core.ZipEntryItem
-import com.example.myfile.core.ZipHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,12 +36,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 内置 ZIP 压缩包浏览器与解压对话框
+ * 通用压缩包浏览器与解压对话框
+ * 支持 ZIP, RAR, 7Z, TAR, GZ/TGZ, BZ2, XZ 等格式
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ZipViewerDialog(
-    zipFile: File,
+fun ArchiveViewerDialog(
+    archiveFile: File,
     title: String,
     defaultExtractDir: File? = null,
     onOpenExtractedDir: ((File) -> Unit)? = null,
@@ -54,13 +51,17 @@ fun ZipViewerDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var allEntries by remember { mutableStateOf<List<ZipEntryItem>>(emptyList()) }
+    var allEntries by remember { mutableStateOf<List<ArchiveEntryItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var currentPath by remember { mutableStateOf("") } // 相对包内路径，例如 "" 或 "subdir/"
 
+    val archiveType = remember(archiveFile) {
+        ArchiveHelper.getArchiveType(archiveFile.name)
+    }
+
     // 提取单个文件并打开状态
-    var openingItem by remember { mutableStateOf<ZipEntryItem?>(null) }
+    var openingItem by remember { mutableStateOf<ArchiveEntryItem?>(null) }
 
     // 全部解压状态
     var showExtractConfirm by remember { mutableStateOf(false) }
@@ -70,10 +71,14 @@ fun ZipViewerDialog(
     var extractDoneCount by remember { mutableIntStateOf(0) }
     var extractTotalCount by remember { mutableIntStateOf(0) }
 
-    // 默认解压目标目录：Downloads/myfile/{zipNameWithoutExtension}
-    val targetExtractDir = remember(zipFile, defaultExtractDir) {
+    // 默认解压目标目录：Downloads/myfile/{archiveNameWithoutExtension}
+    val targetExtractDir = remember(archiveFile, defaultExtractDir) {
         defaultExtractDir ?: run {
-            val baseName = zipFile.nameWithoutExtension.ifBlank { "extracted_archive" }
+            val baseName = archiveFile.name
+                .removeSuffix(".tar.gz").removeSuffix(".tar.bz2").removeSuffix(".tar.xz")
+                .removeSuffix(".tgz").removeSuffix(".tbz2")
+                .substringBeforeLast('.', archiveFile.nameWithoutExtension)
+                .ifBlank { "extracted_archive" }
             val downloads = android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
@@ -81,16 +86,16 @@ fun ZipViewerDialog(
         }
     }
 
-    // 加载 ZIP 内容
-    LaunchedEffect(zipFile) {
+    // 加载压缩包内容
+    LaunchedEffect(archiveFile) {
         isLoading = true
         loadError = null
         withContext(Dispatchers.IO) {
             try {
-                if (!zipFile.exists() || !zipFile.canRead()) {
-                    loadError = "ZIP 文件不存在或无法读取"
+                if (!archiveFile.exists() || !archiveFile.canRead()) {
+                    loadError = "压缩包文件不存在或无法读取"
                 } else {
-                    val entries = ZipHelper.parseAllEntries(zipFile)
+                    val entries = ArchiveHelper.parseAllEntries(archiveFile)
                     allEntries = entries
                 }
             } catch (e: Exception) {
@@ -112,10 +117,9 @@ fun ZipViewerDialog(
         }
     }
 
-    // 拦截系统返回键：如果已进入子目录则返回上一级，根目录则关闭弹窗
+    // 拦截系统返回键
     BackHandler(enabled = true) {
         if (isExtracting) {
-            // 正在解压时防止误触返回
             Toast.makeText(context, "正在解压中，请稍候...", Toast.LENGTH_SHORT).show()
         } else {
             navigateUp()
@@ -124,12 +128,12 @@ fun ZipViewerDialog(
 
     // 当前目录展示项
     val currentItems = remember(allEntries, currentPath) {
-        ZipHelper.listDirectory(allEntries, currentPath)
+        ArchiveHelper.listDirectory(allEntries, currentPath)
     }
 
     // 面包屑分段
     val pathSegments = remember(currentPath) {
-        val list = mutableListOf<Pair<String, String>>() // <DisplayName, Path>
+        val list = mutableListOf<Pair<String, String>>()
         list.add("根目录" to "")
         if (currentPath.isNotEmpty()) {
             val parts = currentPath.trimEnd('/').split('/')
@@ -163,13 +167,31 @@ fun ZipViewerDialog(
                 TopAppBar(
                     title = {
                         Column {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                archiveType?.let { at ->
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = at.displayName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
                             val totalFiles = allEntries.count { !it.isDirectory }
                             val totalDirs = allEntries.count { it.isDirectory }
                             Text(
@@ -324,7 +346,7 @@ fun ZipViewerDialog(
                         else -> {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 items(currentItems, key = { it.entryPath }) { item ->
-                                    ZipItemRow(
+                                    ArchiveItemRow(
                                         item = item,
                                         isOpening = openingItem?.entryPath == item.entryPath,
                                         onClick = {
@@ -335,9 +357,9 @@ fun ZipViewerDialog(
                                                 openingItem = item
                                                 scope.launch {
                                                     try {
-                                                        val cacheDir = File(context.cacheDir, "zip_temp_view")
+                                                        val cacheDir = File(context.cacheDir, "archive_temp_view")
                                                         val tempFile = File(cacheDir, item.name)
-                                                        val ok = ZipHelper.extractEntry(zipFile, item.entryPath, tempFile)
+                                                        val ok = ArchiveHelper.extractEntry(archiveFile, item.entryPath, tempFile)
                                                         if (ok && tempFile.exists()) {
                                                             FileOpener.open(context, tempFile)
                                                         } else {
@@ -397,8 +419,8 @@ fun ZipViewerDialog(
                         extractDoneCount = 0
                         extractTotalCount = 0
                         scope.launch {
-                            val result = ZipHelper.extractAll(
-                                zipFile = zipFile,
+                            val result = ArchiveHelper.extractAll(
+                                archiveFile = archiveFile,
                                 destDir = targetExtractDir,
                                 onProgress = { done, total, curName ->
                                     extractDoneCount = done
@@ -483,11 +505,31 @@ fun ZipViewerDialog(
 }
 
 /**
- * ZIP 内部单项列表 Item
+ * 兼容旧命名 ZipViewerDialog
  */
 @Composable
-private fun ZipItemRow(
-    item: ZipEntryItem,
+fun ZipViewerDialog(
+    zipFile: File,
+    title: String,
+    defaultExtractDir: File? = null,
+    onOpenExtractedDir: ((File) -> Unit)? = null,
+    onDismiss: () -> Unit
+) {
+    ArchiveViewerDialog(
+        archiveFile = zipFile,
+        title = title,
+        defaultExtractDir = defaultExtractDir,
+        onOpenExtractedDir = onOpenExtractedDir,
+        onDismiss = onDismiss
+    )
+}
+
+/**
+ * 压缩包内部单项列表 Item
+ */
+@Composable
+private fun ArchiveItemRow(
+    item: ArchiveEntryItem,
     isOpening: Boolean,
     onClick: () -> Unit
 ) {
@@ -555,17 +597,25 @@ private fun ZipItemRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Text(
-                        text = formatSize(item.size),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (item.compressedSize > 0 && item.compressedSize < item.size) {
-                        val ratio = ((item.compressedSize.toDouble() / item.size) * 100).toInt()
+                    if (item.size >= 0L) {
                         Text(
-                            text = " (压缩率 $ratio%)",
+                            text = formatSize(item.size),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (item.compressedSize > 0 && item.compressedSize < item.size) {
+                            val ratio = ((item.compressedSize.toDouble() / item.size) * 100).toInt()
+                            Text(
+                                text = " (压缩率 $ratio%)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    } else if (item.compressedSize > 0L) {
+                        Text(
+                            text = formatSize(item.compressedSize),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

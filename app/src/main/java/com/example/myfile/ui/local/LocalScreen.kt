@@ -83,7 +83,7 @@ fun LocalScreen(
     var deletingEntry by remember { mutableStateOf<FileEntry?>(null) }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var editingTextEntry by remember { mutableStateOf<FileEntry?>(null) }
-    var viewingZipEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var viewingArchiveEntry by remember { mutableStateOf<FileEntry?>(null) }
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
     var openWithRequest by remember { mutableStateOf<LocalOpenWithRequest?>(null) }
     var showTrafficDebug by remember { mutableStateOf(false) }
@@ -861,8 +861,8 @@ fun LocalScreen(
                                     if (idx >= 0) viewingImageIndex = idx else openEntry(forceChooser = false)
                                 } else if (FileOpener.isText(entry.name)) {
                                     editingTextEntry = entry
-                                } else if (entry.name.endsWith(".zip", ignoreCase = true)) {
-                                    viewingZipEntry = entry
+                                } else if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {
+                                    viewingArchiveEntry = entry
                                 } else {
                                     openEntry(forceChooser = false)
                                 }
@@ -877,8 +877,8 @@ fun LocalScreen(
                                         }
                                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                             if (!entry.isDirectory) {
-                                                if (entry.name.endsWith(".zip", ignoreCase = true)) {
-                                                    DropdownMenuItem(text = { Text("查看压缩包") }, leadingIcon = { Icon(Icons.Filled.FolderZip, null) }, onClick = { showMenu = false; viewingZipEntry = entry })
+                                                if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {
+                                                    DropdownMenuItem(text = { Text("查看压缩包") }, leadingIcon = { Icon(Icons.Filled.FolderZip, null) }, onClick = { showMenu = false; viewingArchiveEntry = entry })
                                                 }
                                                 DropdownMenuItem(text = { Text("当做文本文件打开") }, leadingIcon = { Icon(Icons.Filled.EditNote, null) }, onClick = { showMenu = false; editingTextEntry = entry })
                                                 DropdownMenuItem(text = { Text("打开为…") }, leadingIcon = { Icon(Icons.Filled.OpenInNew, null) }, onClick = { showMenu = false; openEntry(forceChooser = true) })
@@ -1086,16 +1086,16 @@ fun LocalScreen(
         )
     }
 
-    // 内置 ZIP 压缩包浏览器
-    viewingZipEntry?.let { entry ->
-        com.example.myfile.ui.components.ZipViewerDialog(
-            zipFile = File(entry.path),
+    // 内置多格式压缩包浏览器（ZIP, RAR, 7Z, TAR, GZ, TGZ, BZ2, XZ等）
+    viewingArchiveEntry?.let { entry ->
+        com.example.myfile.ui.components.ArchiveViewerDialog(
+            archiveFile = File(entry.path),
             title = entry.name,
             onOpenExtractedDir = { dir ->
-                viewingZipEntry = null
+                viewingArchiveEntry = null
                 vm.navigateTo(dir)
             },
-            onDismiss = { viewingZipEntry = null }
+            onDismiss = { viewingArchiveEntry = null }
         )
     }
 }
