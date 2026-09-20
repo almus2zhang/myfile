@@ -853,4 +853,32 @@ class WebDavViewModel : ViewModel() {
             }
         }
     }
+
+    /** 创建远程 WebDAV 文件/文件夹副本（云端原生 COPY，毫秒级零流量克隆） */
+    fun createDuplicate(entry: FileEntry) {
+        val acc = _state.value.currentAccount ?: return
+        val p = if (entry.path.startsWith("/")) entry.path else "/${entry.path}"
+        val isDir = entry.isDirectory
+        val cleanP = if (p.endsWith("/")) p.dropLast(1) else p
+        val dir = cleanP.substringBeforeLast('/', "")
+        val existingNames = _state.value.files.map { it.name }.toSet()
+        val duplicateName = com.example.myfile.core.DuplicateNameHelper.generate(entry.name, existingNames)
+        val targetBase = if (dir.isEmpty()) "/$duplicateName" else "$dir/$duplicateName"
+        val finalTarget = if (isDir) "$targetBase/" else targetBase
+        val finalSource = if (isDir && !p.endsWith("/")) "$p/" else p
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true)
+            try {
+                val ok = repo.copy(acc, finalSource, finalTarget)
+                if (ok) {
+                    _state.value = _state.value.copy(loading = false, message = "已创建副本：$duplicateName")
+                    refresh()
+                } else {
+                    _state.value = _state.value.copy(loading = false, error = "创建副本失败")
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(loading = false, error = "创建副本失败: ${e.message}")
+            }
+        }
+    }
 }

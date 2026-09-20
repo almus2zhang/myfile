@@ -126,6 +126,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     var showViewModeMenu by remember { mutableStateOf(false) }
     var showAccountMenu by remember { mutableStateOf(false) }
     var editingTextEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var viewingZipFile by remember { mutableStateOf<File?>(null) }
+    var viewingZipTitle by remember { mutableStateOf("") }
 
     LaunchedEffect(state.sortedFiles) {
         pendingScrollRatio?.let { (ratio, offset) ->
@@ -1710,6 +1712,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
 
                                             fun doOpenLocal(file: File) {
                                                 scope.launch doOpen@ {
+                                                    if (!forceChooser && file.name.endsWith(".zip", ignoreCase = true)) {
+                                                        viewingZipFile = file
+                                                        viewingZipTitle = entry.name
+                                                        return@doOpen
+                                                    }
                                                     if (category == "apk") {
                                                         ApkInstaller.install(context, file)
                                                         return@doOpen
@@ -1869,6 +1876,16 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 onDismissRequest = { showMenu = false }
                                             ) {
                                                 if (!entry.isDirectory) {
+                                                    if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("查看压缩包") },
+                                                            leadingIcon = { Icon(Icons.Filled.FolderZip, null) },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                openEntry(forceChooser = false)
+                                                            }
+                                                        )
+                                                    }
                                                     DropdownMenuItem(
                                                         text = { Text("当做文本文件打开") },
                                                         leadingIcon = { Icon(Icons.Filled.EditNote, null) },
@@ -1985,6 +2002,14 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                         }
                                                     )
                                                 }
+                                                DropdownMenuItem(
+                                                    text = { Text("创建副本") },
+                                                    leadingIcon = { Icon(Icons.Filled.FileCopy, null) },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        vm.createDuplicate(entry)
+                                                    }
+                                                )
                                                 DropdownMenuItem(
                                                     text = { Text("复制") },
                                                     leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
@@ -2641,6 +2666,18 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                 ok
             },
             onDismiss = { editingTextEntry = null }
+        )
+    }
+
+    // 内置 ZIP 压缩包浏览器
+    viewingZipFile?.let { file ->
+        com.example.myfile.ui.components.ZipViewerDialog(
+            zipFile = file,
+            title = viewingZipTitle.ifBlank { file.name },
+            onDismiss = {
+                viewingZipFile = null
+                viewingZipTitle = ""
+            }
         )
     }
 }

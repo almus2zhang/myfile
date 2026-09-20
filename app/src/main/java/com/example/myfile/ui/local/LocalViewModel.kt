@@ -333,4 +333,31 @@ class LocalViewModel : ViewModel() {
             refresh()
         }
     }
+
+    /** 创建本地文件/文件夹副本 */
+    fun createDuplicate(entry: FileEntry) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val srcFile = File(entry.path)
+                if (!srcFile.exists()) return@launch
+                val parentDir = srcFile.parentFile ?: return@launch
+                val existingNames = parentDir.list()?.toSet() ?: emptySet()
+                val duplicateName = com.example.myfile.core.DuplicateNameHelper.generate(entry.name, existingNames)
+                val destFile = File(parentDir, duplicateName)
+                if (srcFile.isDirectory) {
+                    srcFile.copyRecursively(destFile, overwrite = false)
+                } else {
+                    srcFile.copyTo(destFile, overwrite = false)
+                }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    _state.value = _state.value.copy(message = "已创建副本：$duplicateName")
+                    refresh()
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    _state.value = _state.value.copy(message = "创建副本失败：${e.message}")
+                }
+            }
+        }
+    }
 }

@@ -83,6 +83,7 @@ fun LocalScreen(
     var deletingEntry by remember { mutableStateOf<FileEntry?>(null) }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var editingTextEntry by remember { mutableStateOf<FileEntry?>(null) }
+    var viewingZipEntry by remember { mutableStateOf<FileEntry?>(null) }
     var viewingImageIndex by remember { mutableStateOf<Int?>(null) }
     var openWithRequest by remember { mutableStateOf<LocalOpenWithRequest?>(null) }
     var showTrafficDebug by remember { mutableStateOf(false) }
@@ -860,6 +861,8 @@ fun LocalScreen(
                                     if (idx >= 0) viewingImageIndex = idx else openEntry(forceChooser = false)
                                 } else if (FileOpener.isText(entry.name)) {
                                     editingTextEntry = entry
+                                } else if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                                    viewingZipEntry = entry
                                 } else {
                                     openEntry(forceChooser = false)
                                 }
@@ -874,10 +877,14 @@ fun LocalScreen(
                                         }
                                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                             if (!entry.isDirectory) {
+                                                if (entry.name.endsWith(".zip", ignoreCase = true)) {
+                                                    DropdownMenuItem(text = { Text("查看压缩包") }, leadingIcon = { Icon(Icons.Filled.FolderZip, null) }, onClick = { showMenu = false; viewingZipEntry = entry })
+                                                }
                                                 DropdownMenuItem(text = { Text("当做文本文件打开") }, leadingIcon = { Icon(Icons.Filled.EditNote, null) }, onClick = { showMenu = false; editingTextEntry = entry })
                                                 DropdownMenuItem(text = { Text("打开为…") }, leadingIcon = { Icon(Icons.Filled.OpenInNew, null) }, onClick = { showMenu = false; openEntry(forceChooser = true) })
                                                 DropdownMenuItem(text = { Text("分享") }, leadingIcon = { Icon(Icons.Filled.Share, null) }, onClick = { showMenu = false; com.example.myfile.core.FileSharer.shareFile(context, java.io.File(entry.path)) })
                                             }
+                                            DropdownMenuItem(text = { Text("创建副本") }, leadingIcon = { Icon(Icons.Filled.FileCopy, null) }, onClick = { showMenu = false; vm.createDuplicate(entry) })
                                             DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Filled.Edit, null) }, onClick = { showMenu = false; renamingEntry = entry })
                                             DropdownMenuItem(text = { Text("属性") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { showMenu = false; propertiesEntry = entry })
                                             HorizontalDivider()
@@ -1076,6 +1083,19 @@ fun LocalScreen(
                 }
             },
             onDismiss = { editingTextEntry = null }
+        )
+    }
+
+    // 内置 ZIP 压缩包浏览器
+    viewingZipEntry?.let { entry ->
+        com.example.myfile.ui.components.ZipViewerDialog(
+            zipFile = File(entry.path),
+            title = entry.name,
+            onOpenExtractedDir = { dir ->
+                viewingZipEntry = null
+                vm.navigateTo(dir)
+            },
+            onDismiss = { viewingZipEntry = null }
         )
     }
 }
