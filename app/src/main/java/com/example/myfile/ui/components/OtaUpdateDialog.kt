@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @Composable
 fun OtaUpdateDialog(
     updateInfo: UpdateInfo,
+    onIgnoreVersion: ((Int) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -69,14 +70,12 @@ fun OtaUpdateDialog(
 
     Dialog(
         onDismissRequest = {
-            if (!updateInfo.forceUpdate) {
-                if (isDownloading) cancelSignal.set(true)
-                onDismiss()
-            }
+            if (isDownloading) cancelSignal.set(true)
+            onDismiss()
         },
         properties = DialogProperties(
-            dismissOnBackPress = !updateInfo.forceUpdate,
-            dismissOnClickOutside = !updateInfo.forceUpdate
+            dismissOnBackPress = true,
+            dismissOnClickOutside = !isDownloading
         )
     ) {
         Surface(
@@ -221,10 +220,29 @@ fun OtaUpdateDialog(
                 // 底部操作按钮
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!updateInfo.forceUpdate) {
+                    // 左侧：忽略此版本
+                    if (onIgnoreVersion != null && !isDownloading && downloadedFile == null) {
+                        TextButton(
+                            onClick = {
+                                onIgnoreVersion(updateInfo.versionCode)
+                                Toast.makeText(context, "已忽略此版本更新", Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            }
+                        ) {
+                            Text(
+                                text = "忽略此版本",
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
+
+                    // 右侧：稍后再说 / 取消下载 与 立即更新 / 立即安装
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
                             onClick = {
                                 if (isDownloading) cancelSignal.set(true)
@@ -234,21 +252,21 @@ fun OtaUpdateDialog(
                             Text(if (isDownloading) "取消下载" else "稍后再说")
                         }
                         Spacer(Modifier.width(8.dp))
-                    }
 
-                    if (downloadedFile != null && downloadedFile!!.exists()) {
-                        Button(onClick = { ApkInstaller.install(context, downloadedFile!!) }) {
-                            Text("立即安装")
-                        }
-                    } else if (isDownloading) {
-                        // 正在下载中，无需再点更新
-                    } else if (errorMessage != null) {
-                        Button(onClick = { startDownload() }) {
-                            Text("重试下载")
-                        }
-                    } else {
-                        Button(onClick = { startDownload() }) {
-                            Text("立即更新")
+                        if (downloadedFile != null && downloadedFile!!.exists()) {
+                            Button(onClick = { ApkInstaller.install(context, downloadedFile!!) }) {
+                                Text("立即安装")
+                            }
+                        } else if (isDownloading) {
+                            // 正在下载中，无需再点更新
+                        } else if (errorMessage != null) {
+                            Button(onClick = { startDownload() }) {
+                                Text("重试下载")
+                            }
+                        } else {
+                            Button(onClick = { startDownload() }) {
+                                Text("立即更新")
+                            }
                         }
                     }
                 }

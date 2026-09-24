@@ -25,7 +25,8 @@ data class DownloadSettings(
     val streamFakeAvi: Boolean = false,         // true = 播放视频时伪装为 .avi 后缀
     val loadRemoteVideoThumbnails: Boolean = false, // true = 自动加载 WebDAV 远程视频首帧缩略图（耗流量）
     val showVideoDuration: Boolean = true,      // true = 列表中显示视频时长与播放进度
-    val autoCheckUpdate: Boolean = true         // true = 启动时自动检查 OTA 更新
+    val autoCheckUpdate: Boolean = true,        // true = 启动时自动检查 OTA 更新
+    val ignoredVersionCode: Int = 0             // 用户选择忽略的 OTA 版本号（该版本不弹出启动提醒）
 )
 
 class SettingsStore(private val context: Context) {
@@ -43,6 +44,7 @@ class SettingsStore(private val context: Context) {
         val LOAD_REMOTE_VIDEO_THUMBNAILS = booleanPreferencesKey("load_remote_video_thumbnails")
         val SHOW_VIDEO_DURATION = booleanPreferencesKey("show_video_duration")
         val AUTO_CHECK_UPDATE = booleanPreferencesKey("auto_check_update")
+        val IGNORED_VERSION_CODE = intPreferencesKey("ignored_version_code")
     }
 
     val settings: Flow<DownloadSettings> = context.settingsStore.data.map { p ->
@@ -58,7 +60,8 @@ class SettingsStore(private val context: Context) {
             streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false,
             loadRemoteVideoThumbnails = p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] ?: false,
             showVideoDuration = p[Keys.SHOW_VIDEO_DURATION] ?: true,
-            autoCheckUpdate = p[Keys.AUTO_CHECK_UPDATE] ?: true
+            autoCheckUpdate = p[Keys.AUTO_CHECK_UPDATE] ?: true,
+            ignoredVersionCode = p[Keys.IGNORED_VERSION_CODE] ?: 0
         )
     }
 
@@ -76,7 +79,8 @@ class SettingsStore(private val context: Context) {
                 streamFakeAvi = p[Keys.STREAM_FAKE_AVI] ?: false,
                 loadRemoteVideoThumbnails = p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] ?: false,
                 showVideoDuration = p[Keys.SHOW_VIDEO_DURATION] ?: true,
-                autoCheckUpdate = p[Keys.AUTO_CHECK_UPDATE] ?: true
+                autoCheckUpdate = p[Keys.AUTO_CHECK_UPDATE] ?: true,
+                ignoredVersionCode = p[Keys.IGNORED_VERSION_CODE] ?: 0
             )
             val updated = transform(current)
             p[Keys.CHUNK_SIZE] = updated.chunkSize
@@ -91,6 +95,15 @@ class SettingsStore(private val context: Context) {
             p[Keys.LOAD_REMOTE_VIDEO_THUMBNAILS] = updated.loadRemoteVideoThumbnails
             p[Keys.SHOW_VIDEO_DURATION] = updated.showVideoDuration
             p[Keys.AUTO_CHECK_UPDATE] = updated.autoCheckUpdate
+            p[Keys.IGNORED_VERSION_CODE] = updated.ignoredVersionCode
         }
+    }
+
+    suspend fun ignoreVersion(versionCode: Int) {
+        update { it.copy(ignoredVersionCode = versionCode) }
+    }
+
+    suspend fun clearIgnoredVersion() {
+        update { it.copy(ignoredVersionCode = 0) }
     }
 }

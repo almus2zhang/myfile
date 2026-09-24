@@ -17,11 +17,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfile.BuildConfig
 import com.example.myfile.R
 import com.example.myfile.ui.components.OtaUpdateDialog
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val s by vm.settings.collectAsState()
     val isCheckingUpdate by vm.isCheckingUpdate.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
@@ -234,6 +236,31 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                                 onCheckedChange = { vm.updateAutoCheckUpdate(it) }
                             )
                         }
+
+                        if (s.ignoredVersionCode > 0) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "已忽略版本：Build ${s.ignoredVersionCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            com.example.myfile.MyApp.instance.settingsStore.clearIgnoredVersion()
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("恢复提醒", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -252,6 +279,11 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
     updateInfo?.let { info ->
         OtaUpdateDialog(
             updateInfo = info,
+            onIgnoreVersion = { code ->
+                scope.launch {
+                    com.example.myfile.MyApp.instance.settingsStore.ignoreVersion(code)
+                }
+            },
             onDismiss = { vm.dismissUpdateDialog() }
         )
     }

@@ -144,16 +144,17 @@ private fun PendingRenameDialog() {
 @Composable
 private fun OtaCheckHandler() {
     val settings by MyApp.instance.settingsStore.settings.collectAsState(initial = null)
+    val scope = rememberCoroutineScope()
     var updateInfo by remember { mutableStateOf<com.example.myfile.core.ota.UpdateInfo?>(null) }
     val hasChecked = remember { mutableStateOf(false) }
 
-    LaunchedEffect(settings?.autoCheckUpdate) {
-        val autoCheck = settings?.autoCheckUpdate ?: return@LaunchedEffect
-        if (autoCheck && !hasChecked.value) {
+    LaunchedEffect(settings?.autoCheckUpdate, settings?.ignoredVersionCode) {
+        val s = settings ?: return@LaunchedEffect
+        if (s.autoCheckUpdate && !hasChecked.value) {
             hasChecked.value = true
             val res = com.example.myfile.core.ota.OtaManager.checkUpdate()
             res.onSuccess { info ->
-                if (info.hasUpdate) {
+                if (info.hasUpdate && info.versionCode > s.ignoredVersionCode) {
                     updateInfo = info
                 }
             }
@@ -163,6 +164,11 @@ private fun OtaCheckHandler() {
     updateInfo?.let { info ->
         com.example.myfile.ui.components.OtaUpdateDialog(
             updateInfo = info,
+            onIgnoreVersion = { code ->
+                scope.launch {
+                    MyApp.instance.settingsStore.ignoreVersion(code)
+                }
+            },
             onDismiss = { updateInfo = null }
         )
     }
