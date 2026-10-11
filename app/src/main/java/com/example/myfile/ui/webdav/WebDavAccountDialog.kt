@@ -296,7 +296,7 @@ fun WebDavAccountDialog(
                                     }
                                     Button(
                                         onClick = {
-                                            val cleanUrl = cleanWebDavUrl(url)
+                                            val cleanUrl = cleanWebDavUrl(url, preserveNoScheme = isDynamic || com.example.myfile.core.DohResolver.hasNoHttpScheme(url))
                                             val probe = WebDavAccount(
                                                 id = initial?.id ?: 0L,
                                                 name = name.trim().ifBlank { "account" },
@@ -478,13 +478,23 @@ fun WebDavAccountDialog(
                     OutlinedButton(
                         enabled = !testing && url.isNotBlank() && user.isNotBlank(),
                         onClick = {
-                            val cleanUrl = cleanWebDavUrl(url)
+                            val isNoScheme = com.example.myfile.core.DohResolver.hasNoHttpScheme(url)
+                            val cleanUrl = cleanWebDavUrl(url, preserveNoScheme = isDynamic || isNoScheme)
                             url = cleanUrl
                             val targetForValidation = if (cleanUrl.startsWith("302:", ignoreCase = true) || cleanUrl.startsWith("301:", ignoreCase = true)) {
                                 cleanUrl.substring(4)
                             } else cleanUrl
+
+                            if (isNoScheme && !isDynamic) {
+                                isDynamic = true
+                            }
+
                             val errorMsg = try {
-                                targetForValidation.toHttpUrl()
+                                if (com.example.myfile.core.DohResolver.hasNoHttpScheme(targetForValidation)) {
+                                    "http://$targetForValidation".toHttpUrl()
+                                } else {
+                                    targetForValidation.toHttpUrl()
+                                }
                                 null
                             } catch (e: Exception) {
                                 e.message ?: "格式无法解析"
@@ -501,7 +511,7 @@ fun WebDavAccountDialog(
                                 url = cleanUrl,
                                 username = user.trim(),
                                 password = pass,
-                                isDynamic = isDynamic,
+                                isDynamic = isDynamic || isNoScheme,
                                 resolvedUrl = resolvedUrl,
                                 renameToVideoExt = renameToVideoExt,
                                 streamFakeAvi = streamFakeAvi,
@@ -520,7 +530,7 @@ fun WebDavAccountDialog(
                                         resolvedUrl = detectedEndpoint
                                     }
                                     val isRedirected = detectedEndpoint.isNotBlank() && detectedEndpoint.trimEnd('/') != cleanUrl.trimEnd('/')
-                                    if (!isDynamic && isRedirected) {
+                                    if (!isDynamic && (isRedirected || isNoScheme)) {
                                         isDynamic = true
                                         testResult = "✓ 连接成功！探测到重定向/动态端点，已自动设为「动态解析」类别 (端点: $detectedEndpoint)"
                                     } else if (isDynamic) {
@@ -552,8 +562,10 @@ fun WebDavAccountDialog(
             TextButton(
                 enabled = name.isNotBlank() && url.isNotBlank(),
                 onClick = {
-                    val cleanUrl = cleanWebDavUrl(url)
-                    val baseForExtras = if (isDynamic && resolvedUrl.isNotBlank()) resolvedUrl else cleanUrl
+                    val isNoScheme = com.example.myfile.core.DohResolver.hasNoHttpScheme(url)
+                    val effectiveIsDynamic = isDynamic || isNoScheme
+                    val cleanUrl = cleanWebDavUrl(url, preserveNoScheme = effectiveIsDynamic)
+                    val baseForExtras = if (effectiveIsDynamic && resolvedUrl.isNotBlank()) resolvedUrl else cleanUrl
                     val extras = buildExtraUrls(baseForExtras, extraPorts)
                     onSave(
                         WebDavAccount(
@@ -563,7 +575,7 @@ fun WebDavAccountDialog(
                             username = user.trim(),
                             password = pass,
                             extraUrls = extras,
-                            isDynamic = isDynamic,
+                            isDynamic = effectiveIsDynamic,
                             resolvedUrl = resolvedUrl,
                             renameToVideoExt = renameToVideoExt,
                             streamFakeAvi = streamFakeAvi,
@@ -661,7 +673,7 @@ private fun OptionSwitch(
 }
 
 /** 清洗并规范化 WebDAV URL，纠正全角字符、不可见字符、空格、重复协议等常见输入错误 */
-fun cleanWebDavUrl(raw: String): String {
+fun cleanWebDavUrl(raw: String, preserveNoScheme: Boolean = false): String {
     if (raw.isBlank()) return ""
     var s = raw
     // 1. 移除常见不可见字符、零宽字符、BOM与不换行空格
@@ -699,8 +711,8 @@ fun cleanWebDavUrl(raw: String): String {
     ) {
         s = s.substring(s.indexOf("://") + 3)
     }
-    // 6. 如果没有 http:// 或 https:// 前缀，自动补齐 http://
-    if (!s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) {
+    // 6. 如果没有 http:// 或 https:// 前缀且不保留无协议，自动补齐 http://
+    if (!preserveNoScheme && !s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) {
         s = "http://$s"
     }
     return (prefix + s).trim()

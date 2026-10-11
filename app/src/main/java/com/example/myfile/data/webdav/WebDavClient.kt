@@ -879,7 +879,19 @@ class WebDavClient(
             val target = extract302TargetUrl(rawUrl).trim()
             if (target.isBlank()) return target
             return try {
-                fetch302WithRedirects(target)
+                var urlToFetch = target
+                if (com.example.myfile.core.DohResolver.hasNoHttpScheme(target)) {
+                    Log.i(TAG, "resolveEndpoint 检测到无 http/https 协议头，尝试并发 DoH 解析 TXT 记录: $rawUrl")
+                    val dohResolved = com.example.myfile.core.DohResolver.resolveTxtAndFormatBlocking(rawUrl)
+                    if (!dohResolved.isNullOrBlank()) {
+                        Log.i(TAG, "resolveEndpoint DoH TXT 解析成功: $rawUrl -> $dohResolved")
+                        urlToFetch = dohResolved
+                    } else {
+                        Log.w(TAG, "resolveEndpoint DoH TXT 未能解析，回退默认 http 协议: http://$target")
+                        urlToFetch = "http://$target"
+                    }
+                }
+                fetch302WithRedirects(urlToFetch)
             } catch (e: Exception) {
                 Log.w(TAG, "resolveEndpoint 异常: ${e.message}")
                 target

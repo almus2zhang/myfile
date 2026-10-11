@@ -51,8 +51,13 @@ fun MyfileTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colors.surface.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+            val barColor = if (darkTheme) BackgroundDark else PrimaryDark
+            window.statusBarColor = barColor.toArgb()
+            val controller = WindowCompat.getInsetsController(window, view)
+            // 状态栏底色为深色（深蓝或夜间黑），状态栏文字与图标强制设为浅色（纯白），彻底解决黑色状态栏文字看不清的问题
+            controller.isAppearanceLightStatusBars = false
         }
     }
     MaterialTheme(
