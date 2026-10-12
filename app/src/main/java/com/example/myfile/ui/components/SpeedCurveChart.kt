@@ -1,4 +1,4 @@
-﻿package com.example.myfile.ui.components
+package com.example.myfile.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * 滚动速度曲线图（带纵坐标 Y 轴刻度指示大小），支持平滑贝塞尔曲线、半透明渐变发光填充与时间窗口。
+ * 滚动速度曲线图（带纵坐标 Y 轴刻度指示大小），支持保形单调三次埃尔米特样条曲线（PCHIP）、半透明渐变发光填充与时间窗口。
+ * 彻底杜绝水平折返、数值过冲及阶梯毛刺，确保曲线圆润平滑且单调严格向前。
  */
 @Composable
 fun SpeedCurveChart(
@@ -24,15 +25,18 @@ fun SpeedCurveChart(
     modifier: Modifier = Modifier,
     windowMs: Long = 60_000L
 ) {
-    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
+    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
 
-    // 只取窗口内的数据点
+    // 只取窗口内的数据点，并按时间升序排序
     val now = System.currentTimeMillis()
     val cutoff = now - windowMs
-    val inWindow = speedHistory.filter { it.first >= cutoff }
+    val inWindow = speedHistory.filter { it.first >= cutoff }.sortedBy { it.first }
+
+    // 处理时间序列：合并过近采样点，并智能补齐起点与当前时间终点
+    val prepared = prepareSpeedData(inWindow, cutoff, now)
 
     // 平滑处理：对窗口内速度做移动平均（滑动窗口），消除瞬时毛刺
-    val smoothed = smoothSpeed(inWindow, windowSize = 5)
+    val smoothed = smoothSpeed(prepared, windowSize = 3)
 
     val maxSpeed = (smoothed.maxOfOrNull { it.second } ?: 0L).coerceAtLeast(1024L)
     val midSpeed = maxSpeed / 2
@@ -72,11 +76,13 @@ fun SpeedCurveChart(
             val w = size.width
             val h = size.height
 
-            // 背景参考线（顶、中、底 3 条虚线）
-            val gridLines = 2
+            val paddingV = 4f
+            val usableH = (h - paddingV * 2).coerceAtLeast(1f)
+
+            // 背景参考线（顶、中、底 3 条虚线，与左侧刻度精确对齐）
             val dashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
-            for (i in 0..gridLines) {
-                val y = h * i / gridLines
+            val gridYs = floatArrayOf(paddingV, paddingV + usableH / 2f, h - paddingV)
+            for (y in gridYs) {
                 drawLine(
                     color = gridColor,
                     start = Offset(0f, y),
@@ -87,107 +93,156 @@ fun SpeedCurveChart(
             }
 
             if (smoothed.isEmpty()) {
-                // 无数据：底部灰色虚线
+                // 无数据：底部静止参考虚线
                 drawLine(
                     color = lineColor.copy(alpha = 0.25f),
-                    start = Offset(0f, h - 2f),
-                    end = Offset(w, h - 2f),
+                    start = Offset(0f, h - paddingV),
+                    end = Offset(w, h - paddingV),
                     strokeWidth = 1.5f,
                     pathEffect = dashEffect
                 )
                 return@Canvas
             }
 
-            // 计算所有数据点坐标 (x, y)
-            val paddingV = 4f
-            val usableH = (h - paddingV * 2).coerceAtLeast(1f)
-            val pts = smoothed.map { (ts, speed) ->
+            // 计算所有数据点屏幕坐标 (x, y)
+            val rawPts = smoothed.map { (ts, speed) ->
                 val x = ((ts - cutoff).toFloat() / windowMs * w).coerceIn(0f, w)
-                val y = (h - paddingV - (speed.toFloat() / maxSpeed * usableH)).coerceIn(paddingV, h - 1f)
+                val y = (h - paddingV - (speed.toFloat() / maxSpeed * usableH)).coerceIn(paddingV, h - paddingV)
                 Offset(x, y)
-            }.sortedBy { it.x }
+            }
+
+            // 屏幕坐标去重与单调递增保证：若两点水平间距 < 2px，合并并保留更高速度点，杜绝斜率无限大或回弹
+            val pts = ArrayList<Offset>(rawPts.size)
+            for (p in rawPts) {
+                if (pts.isEmpty()) {
+                    pts.add(p)
+                } else {
+                    val last = pts.last()
+                    if (p.x - last.x < 2f) {
+                        if (p.y < last.y) { // y 越小速度越高
+                            pts[pts.size - 1] = p
+                        }
+                    } else {
+                        pts.add(p)
+                    }
+                }
+            }
+
+            if (pts.size <= 1) {
+                val pt = pts.firstOrNull() ?: Offset(0f, h - paddingV)
+                drawLine(
+                    color = lineColor.copy(alpha = 0.6f),
+                    start = Offset(0f, pt.y),
+                    end = Offset(w, pt.y),
+                    strokeWidth = 2.2.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawCircle(lineColor, radius = 3.5.dp.toPx(), center = pt)
+                return@Canvas
+            }
 
             val strokePath = Path()
             val fillPath = Path()
 
-            if (pts.size == 1) {
-                strokePath.moveTo(0f, pts[0].y)
-                strokePath.lineTo(w, pts[0].y)
-                drawPath(
-                    path = strokePath,
-                    color = lineColor.copy(alpha = 0.6f),
-                    style = Stroke(width = 2f, cap = StrokeCap.Round)
-                )
-                drawCircle(lineColor, radius = 3.5.dp.toPx(), center = pts[0])
-                return@Canvas
+            // 基于保形三次埃尔米特插值（Monotone Cubic Hermite Spline / PCHIP）构造三次贝塞尔曲线
+            // 该算法在数学上严格保证 X(t) 单调递增且 dx/dt > 0，彻底根除水平折返；极值点导数置 0，杜绝过冲振荡
+            val n = pts.size
+            val secants = FloatArray(n - 1)
+            for (i in 0 until n - 1) {
+                val dx = pts[i + 1].x - pts[i].x
+                val dy = pts[i + 1].y - pts[i].y
+                secants[i] = dy / dx
             }
 
-            // 使用平滑贝塞尔曲线连接数据点 (Catmull-Rom to Cubic Bezier)
+            val slopes = FloatArray(n)
+            for (i in 0 until n) {
+                if (i == 0) {
+                    slopes[i] = secants[0]
+                } else if (i == n - 1) {
+                    slopes[i] = secants[n - 2]
+                } else {
+                    val s0 = secants[i - 1]
+                    val s1 = secants[i]
+                    if (s0 * s1 <= 0f) {
+                        // 局部极值点（峰值或谷值）：切线斜率为 0，保证过渡平滑饱满且不过冲
+                        slopes[i] = 0f
+                    } else {
+                        // PCHIP 谐波均值
+                        slopes[i] = (2f * s0 * s1) / (s0 + s1)
+                    }
+                }
+            }
+
             strokePath.moveTo(pts[0].x, pts[0].y)
-            for (i in 0 until pts.size - 1) {
-                val p0 = pts[(i - 1).coerceAtLeast(0)]
+            for (i in 0 until n - 1) {
                 val p1 = pts[i]
                 val p2 = pts[i + 1]
-                val p3 = pts[(i + 2).coerceAtMost(pts.size - 1)]
+                val dx = p2.x - p1.x
 
-                val cp1x = p1.x + (p2.x - p0.x) / 6f
-                val cp1y = (p1.y + (p2.y - p0.y) / 6f).coerceIn(paddingV, h)
-                val cp2x = p2.x - (p3.x - p1.x) / 6f
-                val cp2y = (p2.y - (p3.y - p1.y) / 6f).coerceIn(paddingV, h)
+                // 控制点 1 位于 1/3 处，控制点 2 位于 2/3 处，X 轴恒单调递增，无任何回折
+                val cp1x = p1.x + dx / 3f
+                val cp1y = (p1.y + slopes[i] * dx / 3f).coerceIn(paddingV, h - paddingV)
+
+                val cp2x = p2.x - dx / 3f
+                val cp2y = (p2.y - slopes[i + 1] * dx / 3f).coerceIn(paddingV, h - paddingV)
 
                 strokePath.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
             }
 
-            // 填充渐变路径
+            // 填充渐变路径：从折线闭合到基准线 (h - paddingV)
             fillPath.addPath(strokePath)
-            fillPath.lineTo(pts.last().x, h)
-            fillPath.lineTo(pts.first().x, h)
+            fillPath.lineTo(pts.last().x, h - paddingV)
+            fillPath.lineTo(pts.first().x, h - paddingV)
             fillPath.close()
 
-            // 1. 绘制半透明渐变区域
+            // 1. 绘制半透明发光渐变填充
             drawPath(
                 path = fillPath,
                 brush = Brush.verticalGradient(
                     colors = listOf(
                         lineColor.copy(alpha = 0.32f),
                         lineColor.copy(alpha = 0.12f),
-                        lineColor.copy(alpha = 0.01f)
+                        lineColor.copy(alpha = 0.01f),
+                        Color.Transparent
                     ),
-                    startY = 0f,
-                    endY = h
+                    startY = paddingV,
+                    endY = h - paddingV
                 )
             )
 
-            // 2. 绘制平滑线条（横向渐变高亮）
+            // 2. 绘制平滑主体曲线（横向发光渐变）
             drawPath(
                 path = strokePath,
                 brush = Brush.horizontalGradient(
                     colors = listOf(
-                        lineColor.copy(alpha = 0.55f),
+                        lineColor.copy(alpha = 0.45f),
+                        lineColor.copy(alpha = 0.85f),
                         lineColor
                     ),
                     startX = pts.first().x,
                     endX = pts.last().x.coerceAtLeast(pts.first().x + 1f)
                 ),
                 style = Stroke(
-                    width = 2.5.dp.toPx(),
+                    width = 2.2.dp.toPx(),
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round
                 )
             )
 
-            // 3. 峰值点标记
-            val peakEntry = smoothed.maxByOrNull { it.second }
-            if (peakEntry != null && peakEntry.second > 0L) {
-                val px = ((peakEntry.first - cutoff).toFloat() / windowMs * w).coerceIn(0f, w)
-                val py = (h - paddingV - (peakEntry.second.toFloat() / maxSpeed * usableH)).coerceIn(paddingV, h - 1f)
-                val peakOffset = Offset(px, py)
+            // 3. 峰值点标记（若峰值明显且距离最新点有一定间隔）
+            val peakPt = pts.minByOrNull { it.y }
+            if (peakPt != null && maxSpeed > 1024L) {
                 val lastOffset = pts.last()
-                if (Math.abs(peakOffset.x - lastOffset.x) > 12f || Math.abs(peakOffset.y - lastOffset.y) > 12f) {
+                if (Math.abs(peakPt.x - lastOffset.x) > 16f || Math.abs(peakPt.y - lastOffset.y) > 16f) {
                     drawCircle(
-                        color = lineColor.copy(alpha = 0.45f),
-                        radius = 3.dp.toPx(),
-                        center = peakOffset
+                        color = lineColor.copy(alpha = 0.35f),
+                        radius = 4.dp.toPx(),
+                        center = peakPt
+                    )
+                    drawCircle(
+                        color = lineColor,
+                        radius = 2.dp.toPx(),
+                        center = peakPt
                     )
                 }
             }
@@ -214,12 +269,53 @@ fun SpeedCurveChart(
 }
 
 /**
+ * 预处理时间窗口内的速度采样点：
+ * 1. 若首个采样点晚于窗口起点，自动补齐从 0 开始的平滑爬升锚点；
+ * 2. 合并 < 150ms 的密集采样点，防止重叠抖动；
+ * 3. 若最新采样点距离当前时间超过 1s，延伸至当前时间保持图表右侧贴边。
+ */
+private fun prepareSpeedData(
+    data: List<Pair<Long, Long>>,
+    cutoff: Long,
+    now: Long
+): List<Pair<Long, Long>> {
+    if (data.isEmpty()) return emptyList()
+
+    val result = ArrayList<Pair<Long, Long>>(data.size + 3)
+
+    val first = data.first()
+    // 若中途开始传输，补齐 0 速率起点
+    if (first.first > cutoff + 1000L) {
+        result.add(cutoff to 0L)
+        if (first.first - 300L > cutoff) {
+            result.add((first.first - 300L) to 0L)
+        }
+    }
+
+    for (pt in data) {
+        if (result.isNotEmpty() && pt.first - result.last().first < 150L) {
+            val last = result.last()
+            result[result.size - 1] = pt.first to maxOf(last.second, pt.second)
+        } else {
+            result.add(pt)
+        }
+    }
+
+    val last = result.last()
+    if (now - last.first > 1000L) {
+        result.add(now to last.second)
+    }
+
+    return result
+}
+
+/**
  * 对速度序列做滑动窗口移动平均，消除瞬时毛刺，让曲线更平滑。
  * @param windowSize 移动平均窗口大小（采样点数，奇数最佳），越大越平滑。
  */
 fun smoothSpeed(
     data: List<Pair<Long, Long>>,
-    windowSize: Int = 5
+    windowSize: Int = 3
 ): List<Pair<Long, Long>> {
     if (data.size < 3 || windowSize <= 1) return data
     val half = windowSize / 2
@@ -237,4 +333,3 @@ fun smoothSpeed(
     }
     return result
 }
-

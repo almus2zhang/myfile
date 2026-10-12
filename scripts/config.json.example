@@ -1,0 +1,23 @@
+{
+  "output_file": "/var/www/webdav/webdav_index.json",
+  "mappings": [
+    {
+      "local_dir": "/var/www/webdav/projects/frontend",
+      "webdav_prefix": "/projects/frontend/"
+    },
+    {
+      "local_dir": "/var/www/webdav/projects/backend",
+      "webdav_prefix": "/projects/backend/"
+    }
+  ],
+  "excludes": [
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".DS_Store",
+    "dist",
+    "build"
+  ],
+  "debounce_seconds": 2,
+  "interval_minutes": 1440
+}

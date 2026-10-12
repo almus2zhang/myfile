@@ -1,4 +1,4 @@
-﻿*.iml
+*.iml
 .gradle
 /local.properties
 /.idea/
@@ -13,3 +13,5 @@ local.properties
 *.log
 .codebuddy/
 *.stackdump
+__pycache__/
+*.pyc
