@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-blue.svg)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-blueviolet.svg)](https://developer.android.com/jetpack/compose)
-[![Release](https://img.shields.io/badge/Release-v1.2.8-orange.svg)](https://github.com/almus2zhang/myfile/releases)
+[![Release](https://img.shields.io/badge/Release-v1.3.3-orange.svg)](https://github.com/almus2zhang/myfile/releases)
 
 ---
 
@@ -27,10 +27,12 @@
   - **原理机制**：基于服务端预生成的 `webdav_index.json`（紧凑三元组格式 `[路径, 字节大小, 时间戳]`）。
   - **秒级响应**：本地持久化轻量缓存，启动时毫秒级预热。即使百万级文件体量，多关键词空格分词过滤依然近乎瞬时出结果。
   - **智能增量校验**：自动检查 HTTP ETag / Last-Modified / Content-Length，仅在云端索引变更时增量/按需同步，节省流量。
+  - **服务端生成脚本**：工程内自带配套生成脚本（详见 [scripts/ 目录](scripts/README.md)），支持零依赖单次扫描与实时监听守护进程。
   - **配置与使用**：在 WebDAV 账户设置中填写「索引文件路径」（例如 `/webdav_index.json`），勾选自动同步；进入搜索后点击输入框右侧按钮可一键在“索引搜索”与“普通搜索”间无缝切换。
 - **🔍 目录递归普通搜索**：
   - 无需额外配置或前置生成索引文件，即开即用。
   - 自动在当前所在目录及所有子目录下进行广度优先深度遍历扫描，边扫描边实时流式呈现匹配结果。
+  - 文件名中匹配的所有关键词高亮显示。
 
 ### 🧭 3. 路径面包屑与手动路径直达（支持隐藏路径）
 - **层级穿梭**：支持点击面包屑任意层级回跳；
@@ -64,6 +66,24 @@
 ### 🔄 7. 灵活的 OTA 在线更新
 - 支持启动时静默检查与设置页手动检查。
 - **自主掌控更新**：支持「稍后再说」与「忽略此版本」，拒绝强制更新打扰；设置页可随时查看已忽略版本并一键恢复提醒。
+
+---
+
+## ⚡ 服务端索引生成脚本 (Server-side Indexing)
+
+工程在 [`scripts/`](scripts/README.md) 目录下提供了完整的索引生成与自动化监听脚本套件：
+
+- **单次生成脚本 (`generate_index.py`)**：纯 Python 3 标准库实现（零第三方依赖），可直接用于 NAS、Linux 或通过 Crontab 定时生成。
+  ```bash
+  # 扫描本地目录并生成索引
+  python3 scripts/generate_index.py /data/webdav -p / -o /data/webdav/webdav_index.json
+  ```
+- **实时监听守护进程 (`webdav_indexer_daemon.py`)**：基于 `watchdog`，后台实时监听文件变更并防抖刷新，支持 Docker、Systemd 服务化部署。
+  ```bash
+  pip install -r scripts/requirements.txt
+  python3 scripts/webdav_indexer_daemon.py scripts/config.json
+  ```
+- 完整配置说明与 Docker / Systemd 部署方案请阅读：👉 [scripts/README.md](scripts/README.md)。
 
 ---
 
