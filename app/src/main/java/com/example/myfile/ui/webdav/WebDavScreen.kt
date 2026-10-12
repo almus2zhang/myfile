@@ -2160,6 +2160,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 }
 
                                 val itemParentPath = if (searchMode) entry.parentDirectory else null
+                                val itemHighlightQuery = if (searchMode && searchQuery.isNotBlank()) searchQuery else null
 
                                 when (viewMode) {
                                     ViewMode.DETAILS -> {
@@ -2177,6 +2178,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                 isSelected = entry.path in state.selected,
                                                 hasLocalCache = hasLocalCache,
                                                 parentPath = itemParentPath,
+                                                highlightQuery = itemHighlightQuery,
                                                 onClick = onItemClick,
                                                 onLongClick = onItemLongClick,
                                                 trailing = trailingMenu
@@ -2196,6 +2198,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
                                             parentPath = itemParentPath,
+                                            highlightQuery = itemHighlightQuery,
                                             isLarge = true,
                                             showBorder = false,
                                             trailing = trailingMenu
@@ -2214,6 +2217,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             videoDurationMs = durMs,
                                             videoPositionMs = posMs,
                                             parentPath = itemParentPath,
+                                            highlightQuery = itemHighlightQuery,
                                             isLarge = false,
                                             showBorder = false,
                                             trailing = trailingMenu
@@ -2227,6 +2231,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             isSelected = entry.path in state.selected,
                                             hasLocalCache = hasLocalCache,
                                             parentPath = itemParentPath,
+                                            highlightQuery = itemHighlightQuery,
                                             trailing = trailingMenu
                                         )
                                     }

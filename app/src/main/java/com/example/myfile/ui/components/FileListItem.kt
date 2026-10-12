@@ -52,6 +52,7 @@ fun FileListItem(
     videoDurationMs: Long? = null,
     videoPositionMs: Long? = null,
     parentPath: String? = null,
+    highlightQuery: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -196,7 +197,7 @@ fun FileListItem(
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Text(
-                text = entry.name,
+                text = buildHighlightedText(text = entry.name, query = highlightQuery),
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontWeight = FontWeight.Medium,
                     lineHeight = 21.sp

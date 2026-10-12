@@ -39,6 +39,7 @@ fun FileGridItem(
     videoDurationMs: Long? = null,
     videoPositionMs: Long? = null,
     parentPath: String? = null,
+    highlightQuery: String? = null,
     isLarge: Boolean = true,
     showBorder: Boolean = true,
     trailing: @Composable (() -> Unit)? = null
@@ -163,7 +164,7 @@ fun FileGridItem(
 
                 // 文件名
                 Text(
-                    text = entry.name,
+                    text = buildHighlightedText(text = entry.name, query = highlightQuery),
                     style = if (isLarge) MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
                     else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,

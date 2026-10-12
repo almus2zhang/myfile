@@ -734,17 +734,26 @@ class WebDavViewModel : ViewModel() {
             return
         }
 
+        // 立即清空旧的搜索结果，防止上一次搜索（或上一模式）的结果残留展示
+        _searchResults.value = emptyList()
+
         if (_searchType.value == SearchType.NORMAL) {
-            // 普通搜索：在当前目录下递归搜索文件名
+            // 普通搜索：在当前目录下递归搜索文件名（支持多关键词空格分隔，全部匹配）
             normalSearchJob?.cancel()
             val startPath = _state.value.currentPath
-            val queryLower = q.trim().lowercase()
+            val keywords = com.example.myfile.core.WebDavIndex.parseKeywords(q)
+            if (keywords.isEmpty()) {
+                _searchLoading.value = false
+                return
+            }
             val job = viewModelScope.launch(Dispatchers.IO) {
                 _searchLoading.value = true
                 val results = mutableListOf<FileEntry>()
                 try {
                     val queue = java.util.ArrayDeque<String>()
+                    val visitedDirs = mutableSetOf<String>()
                     queue.add(startPath)
+                    visitedDirs.add(startPath.trimEnd('/').ifEmpty { "/" })
                     while (queue.isNotEmpty() && isActive) {
                         val curDir = queue.poll() ?: break
                         val entries = try {
@@ -755,12 +764,18 @@ class WebDavViewModel : ViewModel() {
                         }
                         for (entry in entries) {
                             if (!isActive) break
-                            if (entry.name.lowercase().contains(queryLower)) {
+                            val nameLower = entry.name.lowercase()
+                            // 多关键词全部匹配
+                            if (keywords.all { nameLower.contains(it) }) {
                                 results.add(entry)
                                 _searchResults.value = results.toList()
                             }
                             if (entry.isDirectory) {
-                                queue.add(entry.path)
+                                val normPath = entry.path.trimEnd('/').ifEmpty { "/" }
+                                if (normPath !in visitedDirs) {
+                                    visitedDirs.add(normPath)
+                                    queue.add(entry.path)
+                                }
                             }
                         }
                     }

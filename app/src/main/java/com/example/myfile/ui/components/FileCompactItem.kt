@@ -32,6 +32,7 @@ fun FileCompactItem(
     isSelected: Boolean = false,
     hasLocalCache: Boolean = false,
     parentPath: String? = null,
+    highlightQuery: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
@@ -72,7 +73,7 @@ fun FileCompactItem(
             verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Text(
-                text = entry.name,
+                text = buildHighlightedText(text = entry.name, query = highlightQuery),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
