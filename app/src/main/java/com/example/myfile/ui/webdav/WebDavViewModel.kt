@@ -18,6 +18,7 @@ import java.io.File
 import com.example.myfile.model.ViewMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 
 data class WebDavUiState(
     val accounts: List<WebDavAccount> = emptyList(),
@@ -529,7 +530,28 @@ class WebDavViewModel : ViewModel() {
         return job
     }
 
-    // ---------- WEBDAV 索引搜索 ----------
+    // ---------- WEBDAV 搜索（索引搜索 / 普通递归搜索） ----------
+
+    enum class SearchType {
+        INDEX,
+        NORMAL
+    }
+
+    /** 搜索类型：索引搜索 vs 普通递归搜索 */
+    private val _searchType = MutableStateFlow(SearchType.INDEX)
+    val searchType: StateFlow<SearchType> = _searchType.asStateFlow()
+
+    /** 普通递归搜索取消 Job */
+    private var normalSearchJob: kotlinx.coroutines.Job? = null
+
+    /** 切换搜索模式 */
+    fun setSearchType(type: SearchType) {
+        if (_searchType.value == type) return
+        _searchType.value = type
+        if (_searchMode.value && _searchQuery.value.isNotBlank()) {
+            performSearch(_searchQuery.value)
+        }
+    }
 
     /** 是否处于搜索模式（面包屑位置显示搜索框） */
     private val _searchMode = MutableStateFlow(false)
@@ -579,24 +601,30 @@ class WebDavViewModel : ViewModel() {
     val searchEntryPath: StateFlow<String?> = _searchEntryPath.asStateFlow()
 
     /** 进入搜索模式 */
-    fun enterSearch() {
+    fun enterSearch(preferredType: SearchType? = null) {
+        val acc = _state.value.currentAccount ?: return
+        val targetType = preferredType ?: if (acc.indexPath.isNotBlank()) SearchType.INDEX else SearchType.NORMAL
+        _searchType.value = targetType
         _searchMode.value = true
         _searchQuery.value = ""
         _searchResults.value = emptyList()
-        val acc = _state.value.currentAccount ?: return
-        // 先从本地磁盘秒级预热
-        val cached = com.example.myfile.core.WebDavIndex.warmupFromDisk(acc.id)
-        if (cached != null) {
-            _indexTotal.value = cached.size
-        } else if (acc.indexPath.isNotBlank()) {
-            // 本地完全没有索引，且配置了索引路径，按需触发一次同步
-            syncIndex(acc, forceRefresh = false)
+        normalSearchJob?.cancel()
+        if (targetType == SearchType.INDEX) {
+            // 先从本地磁盘秒级预热
+            val cached = com.example.myfile.core.WebDavIndex.warmupFromDisk(acc.id)
+            if (cached != null) {
+                _indexTotal.value = cached.size
+            } else if (acc.indexPath.isNotBlank()) {
+                // 本地完全没有索引，且配置了索引路径，按需触发一次同步
+                syncIndex(acc, forceRefresh = false)
+            }
+            _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(acc.id)
         }
-        _indexTime.value = com.example.myfile.core.WebDavIndex.getIndexTime(acc.id)
     }
 
     /** 退出搜索模式，恢复普通列表 */
     fun exitSearch() {
+        normalSearchJob?.cancel()
         _searchMode.value = false
         _searchQuery.value = ""
         _searchResults.value = emptyList()
@@ -700,10 +728,56 @@ class WebDavViewModel : ViewModel() {
     private fun performSearch(q: String) {
         val acc = _state.value.currentAccount ?: return
         if (q.isBlank()) {
+            normalSearchJob?.cancel()
             _searchResults.value = emptyList()
+            _searchLoading.value = false
             return
         }
+
+        if (_searchType.value == SearchType.NORMAL) {
+            // 普通搜索：在当前目录下递归搜索文件名
+            normalSearchJob?.cancel()
+            val startPath = _state.value.currentPath
+            val queryLower = q.trim().lowercase()
+            val job = viewModelScope.launch(Dispatchers.IO) {
+                _searchLoading.value = true
+                val results = mutableListOf<FileEntry>()
+                try {
+                    val queue = java.util.ArrayDeque<String>()
+                    queue.add(startPath)
+                    while (queue.isNotEmpty() && isActive) {
+                        val curDir = queue.poll() ?: break
+                        val entries = try {
+                            repo.list(acc, curDir)
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            emptyList()
+                        }
+                        for (entry in entries) {
+                            if (!isActive) break
+                            if (entry.name.lowercase().contains(queryLower)) {
+                                results.add(entry)
+                                _searchResults.value = results.toList()
+                            }
+                            if (entry.isDirectory) {
+                                queue.add(entry.path)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.e("WebDavVM", "normal search failed", e)
+                } finally {
+                    _searchLoading.value = false
+                }
+            }
+            normalSearchJob = job
+            return
+        }
+
+        // 索引搜索
         val keywords = com.example.myfile.core.WebDavIndex.parseKeywords(q)
+        normalSearchJob?.cancel()
         viewModelScope.launch {
             _searchLoading.value = true
             try {

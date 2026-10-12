@@ -225,6 +225,8 @@ fun LocalScreen(
     val localCrumbs = remember(state.currentDir) { buildLocalCrumbs(vm.rootDir, state.currentDir) }
     var lastLocalCrumbClickCount by remember(state.currentDir) { mutableIntStateOf(0) }
     var lastLocalCrumbClickTime by remember(state.currentDir) { mutableLongStateOf(0L) }
+    var showManualPathDialog by remember { mutableStateOf(false) }
+    var manualPathInput by remember { mutableStateOf("") }
 
     BackHandler(enabled = !isRoot || state.multiSelectMode || onBack != null) {
         if (state.multiSelectMode) {
@@ -745,6 +747,27 @@ fun LocalScreen(
                                 Text(text = crumb.name, color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                             }
                         }
+
+                        // 最右侧增加空白区域，点击弹出手动输入本目录下路径进入（支持隐藏路径）
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp)
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    manualPathInput = ""
+                                    showManualPathDialog = true
+                                }
+                                .padding(horizontal = 6.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = "手动输入路径",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
                     }
 
                     // 实时速度徽章（固定在右侧，不随面包屑滚动）
@@ -1134,6 +1157,68 @@ fun LocalScreen(
                 vm.navigateTo(dir)
             },
             onDismiss = { viewingArchiveEntry = null }
+        )
+    }
+
+    // 手动输入路径进入对话框（支持进入隐藏路径）
+    if (showManualPathDialog) {
+        val curDir = state.currentDir
+        AlertDialog(
+            onDismissRequest = { showManualPathDialog = false },
+            title = {
+                Text("进入路径", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "当前目录：${curDir.absolutePath}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = manualPathInput,
+                        onValueChange = { manualPathInput = it },
+                        label = { Text("相对或绝对路径") },
+                        placeholder = { Text("如 subfolder 或 /storage/emulated/0/...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "提示：输入相对路径将在当前目录下跳转，支持直接进入隐蔽/隐藏的文件夹。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val input = manualPathInput.trim()
+                        if (input.isNotBlank()) {
+                            val target = if (input.startsWith("/")) {
+                                File(input)
+                            } else {
+                                File(curDir, input)
+                            }
+                            showManualPathDialog = false
+                            if (target.exists() && target.isDirectory) {
+                                vm.navigateTo(target)
+                            } else {
+                                android.widget.Toast.makeText(context, "目录不存在或无法访问: ${target.absolutePath}", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                ) {
+                    Text("进入")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualPathDialog = false }) {
+                    Text("取消")
+                }
+            }
         )
     }
 }

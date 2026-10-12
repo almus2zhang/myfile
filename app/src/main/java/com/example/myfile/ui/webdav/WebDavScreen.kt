@@ -180,7 +180,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val showHiddenFiles by vm.showHiddenFilesFlow.collectAsState()
     val durationRefreshTrigger by vm.durationRefreshTrigger.collectAsState()
 
-    // 索引搜索状态
+    // 搜索状态
+    val searchType by vm.searchType.collectAsState()
     val searchMode by vm.searchMode.collectAsState()
     val searchQuery by vm.searchQuery.collectAsState()
     val searchResults by vm.searchResults.collectAsState()
@@ -198,6 +199,10 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var lastProcessedTrigger by remember { mutableStateOf(0) }
+
+    // 面包屑空白处点击：手动输入路径弹窗状态
+    var showManualPathDialog by remember { mutableStateOf(false) }
+    var manualPathInput by remember { mutableStateOf("") }
 
     fun startUploadLocalProcess(localFile: File, remotePath: String) {
         android.widget.Toast.makeText(context, "正在上传本地文件到 WebDAV...", android.widget.Toast.LENGTH_SHORT).show()
@@ -658,15 +663,22 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 0. 索引搜索按钮（仅当该账户配置了索引路径时显示）
-                        if (!state.currentAccount?.indexPath.isNullOrBlank()) {
+                        // 0. 搜索按钮（支持索引搜索与普通递归搜索切换）
+                        if (state.currentAccount != null) {
                             IconButton(
-                                onClick = { if (searchMode) vm.exitSearch() else vm.enterSearch() },
+                                onClick = {
+                                    if (searchMode) {
+                                        vm.exitSearch()
+                                    } else {
+                                        val hasIndex = !state.currentAccount?.indexPath.isNullOrBlank()
+                                        vm.enterSearch(if (hasIndex) WebDavViewModel.SearchType.INDEX else WebDavViewModel.SearchType.NORMAL)
+                                    }
+                                },
                                 modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
                                     imageVector = if (searchMode) Icons.Filled.SearchOff else Icons.Filled.Search,
-                                    contentDescription = "搜索索引",
+                                    contentDescription = "搜索",
                                     tint = if (searchMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -1178,7 +1190,13 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { vm.onSearchQueryChange(it) },
-                                placeholder = { Text("搜索索引，如 abc .p", style = MaterialTheme.typography.bodyMedium) },
+                                placeholder = {
+                                    Text(
+                                        if (searchType == WebDavViewModel.SearchType.INDEX) "全盘索引搜索，如 abc .p"
+                                        else "本目录下递归搜索文件名",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                },
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp),
                                 textStyle = MaterialTheme.typography.bodyMedium,
@@ -1191,32 +1209,74 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 )
                             )
                             Spacer(Modifier.width(4.dp))
-                            IconButton(
-                                onClick = { vm.refreshIndex() },
-                                enabled = !indexSyncing,
-                                modifier = Modifier.size(36.dp)
+
+                            // 切换搜索模式按钮（索引搜索 vs 普通递归搜索）
+                            Surface(
+                                onClick = {
+                                    if (searchType == WebDavViewModel.SearchType.INDEX) {
+                                        vm.setSearchType(WebDavViewModel.SearchType.NORMAL)
+                                    } else {
+                                        if (state.currentAccount?.indexPath.isNullOrBlank()) {
+                                            android.widget.Toast.makeText(context, "当前账户未配置索引文件路径，请在编辑账户中配置", android.widget.Toast.LENGTH_LONG).show()
+                                        } else {
+                                            vm.setSearchType(WebDavViewModel.SearchType.INDEX)
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                modifier = Modifier.height(36.dp)
                             ) {
-                                if (indexSyncing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                } else {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                ) {
                                     Icon(
-                                        Icons.Filled.Sync,
-                                        contentDescription = "强制刷新索引",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
+                                        imageVector = if (searchType == WebDavViewModel.SearchType.INDEX) Icons.Filled.ListAlt else Icons.Filled.FolderCopy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = if (searchType == WebDavViewModel.SearchType.INDEX) "切普通" else "切索引",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
+
+                            if (searchType == WebDavViewModel.SearchType.INDEX) {
+                                Spacer(Modifier.width(2.dp))
+                                IconButton(
+                                    onClick = { vm.refreshIndex() },
+                                    enabled = !indexSyncing,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    if (indexSyncing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.Sync,
+                                            contentDescription = "强制刷新索引",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+
                             Spacer(Modifier.width(2.dp))
                             IconButton(onClick = { vm.exitSearch() }, modifier = Modifier.size(36.dp)) {
                                 Icon(Icons.Filled.Close, contentDescription = "退出搜索", modifier = Modifier.size(20.dp))
                             }
                         }
-                        if (indexProgress.isDownloading) {
+
+                        if (searchType == WebDavViewModel.SearchType.INDEX && indexProgress.isDownloading) {
                             if (indexProgress.percentage >= 0) {
                                 LinearProgressIndicator(
                                     progress = { indexProgress.percentage / 100f },
@@ -1234,16 +1294,26 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     .padding(start = 14.dp, end = 14.dp, bottom = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (indexTotal > 0 || indexTime > 0L) {
-                                        if (searchQuery.isBlank()) "共 $indexTotal 条索引$indexTimeStr"
-                                        else "检索到 ${searchResults.size} 项 / 共 $indexTotal 条索引$indexTimeStr"
-                                    } else {
-                                        "暂无本地索引，点击右上角刷新"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                                )
+                                if (searchType == WebDavViewModel.SearchType.INDEX) {
+                                    Text(
+                                        text = if (indexTotal > 0 || indexTime > 0L) {
+                                            if (searchQuery.isBlank()) "⚡ 索引搜索：全盘极速秒搜 · 共 $indexTotal 条索引$indexTimeStr"
+                                            else "⚡ 索引搜索：检索到 ${searchResults.size} 项 / 共 $indexTotal 条索引$indexTimeStr"
+                                        } else {
+                                            "⚡ 索引搜索：暂无本地索引，点击右上角刷新下载"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                    )
+                                } else {
+                                    Text(
+                                        text = if (searchLoading) "🔍 普通搜索：正在当前目录递归扫描匹配文件名... 已找到 ${searchResults.size} 项"
+                                        else if (searchQuery.isBlank()) "🔍 普通搜索：递归遍历「${state.currentPath}」及其子目录下所有文件"
+                                        else "🔍 普通搜索：在当前目录下检索到 ${searchResults.size} 项",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1351,6 +1421,27 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
+                            }
+
+                            // 最右侧增加空白区域，点击弹出手动输入本目录下路径进入（支持隐藏路径）
+                            Box(
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp)
+                                    .height(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        manualPathInput = ""
+                                        showManualPathDialog = true
+                                    }
+                                    .padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = "手动输入路径",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                    modifier = Modifier.size(13.dp)
+                                )
                             }
                         }
 
@@ -2698,6 +2789,64 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
             onDismiss = {
                 viewingArchiveFile = null
                 viewingArchiveTitle = ""
+            }
+        )
+    }
+
+    // 手动输入路径进入对话框（支持进入隐藏路径）
+    if (showManualPathDialog) {
+        val curPath = state.currentPath.trimEnd('/').ifEmpty { "/" }
+        AlertDialog(
+            onDismissRequest = { showManualPathDialog = false },
+            title = {
+                Text("进入路径", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "当前目录：$curPath",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = manualPathInput,
+                        onValueChange = { manualPathInput = it },
+                        label = { Text("相对或绝对路径") },
+                        placeholder = { Text("如 subfolder 或 /other/path") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "提示：输入相对路径将在当前目录下跳转，支持直接进入隐蔽/隐藏的文件夹。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val input = manualPathInput.trim()
+                        if (input.isNotBlank()) {
+                            val targetPath = if (input.startsWith("/")) {
+                                input
+                            } else {
+                                if (curPath == "/") "/$input" else "$curPath/$input"
+                            }
+                            showManualPathDialog = false
+                            vm.navigateTo(targetPath)
+                        }
+                    }
+                ) {
+                    Text("进入")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualPathDialog = false }) {
+                    Text("取消")
+                }
             }
         )
     }
