@@ -1971,9 +1971,37 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 val trailingMenu: @Composable () -> Unit = {
                                     if (!state.multiSelectMode) {
                                         var showMenu by remember { mutableStateOf(false) }
+                                        val scope = rememberCoroutineScope()
+                                        var clickCount by remember(entry.path) { mutableIntStateOf(0) }
+                                        var lastClickTime by remember(entry.path) { mutableLongStateOf(0L) }
+                                        var openMenuJob by remember(entry.path) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                                         Box {
                                             IconButton(
-                                                onClick = { showMenu = true },
+                                                onClick = {
+                                                    val now = System.currentTimeMillis()
+                                                    if (now - lastClickTime < 700L) {
+                                                        clickCount++
+                                                    } else {
+                                                        clickCount = 1
+                                                    }
+                                                    lastClickTime = now
+                                                    openMenuJob?.cancel()
+
+                                                    if (clickCount >= 6) {
+                                                        clickCount = 0
+                                                        lastClickTime = 0L
+                                                        showMenu = false
+                                                        vm.hideItem(entry.path)
+                                                        Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        openMenuJob = scope.launch {
+                                                            kotlinx.coroutines.delay(if (clickCount == 1) 200L else 350L)
+                                                            showMenu = true
+                                                            clickCount = 0
+                                                            lastClickTime = 0L
+                                                        }
+                                                    }
+                                                },
                                                 modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp)
                                             ) {
                                                 Icon(
@@ -1984,7 +2012,11 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             }
                                             DropdownMenu(
                                                 expanded = showMenu,
-                                                onDismissRequest = { showMenu = false }
+                                                onDismissRequest = {
+                                                    showMenu = false
+                                                    clickCount = 0
+                                                    lastClickTime = 0L
+                                                }
                                             ) {
                                                 if (!entry.isDirectory) {
                                                     if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {

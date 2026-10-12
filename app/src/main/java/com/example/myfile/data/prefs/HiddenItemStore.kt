@@ -97,18 +97,40 @@ class HiddenItemStore(context: Context) {
 
         /**
          * 判断路径是否处于隐藏状态（自身被隐藏，或其任意层级的父目录被隐藏）
+         * @param currentDir 当前正在浏览的目录路径。若提供了当前目录，且某个隐藏的祖先目录正是当前目录本身或当前目录的上级目录
+         *                   （说明用户是通过输入路径等方式主动进入了该隐藏目录内部），则不因该祖先目录隐藏而过滤掉当前目录下的内容。
          */
-        fun isHidden(path: String, hiddenSet: Set<String>): Boolean {
+        fun isHidden(path: String, hiddenSet: Set<String>, currentDir: String? = null): Boolean {
             if (hiddenSet.isEmpty()) return false
             val p = normalizePath(path)
-            if (hiddenSet.contains(p)) return true
+            val cur = currentDir?.let { normalizePath(it) }
 
+            // 1. 如果条目本身直接在 hiddenSet 中：
+            if (hiddenSet.contains(p)) {
+                // 如果恰好 p == cur，即检查的是当前目录自身，不应视为隐藏
+                if (cur != null && p == cur) {
+                    // entry 本身是当前目录
+                } else {
+                    return true
+                }
+            }
+
+            // 2. 检查祖先目录：
             var curr = p
             while (true) {
                 val idx = curr.lastIndexOf('/')
                 if (idx <= 0) break
                 curr = curr.substring(0, idx)
-                if (hiddenSet.contains(curr)) return true
+                if (hiddenSet.contains(curr)) {
+                    // 如果被隐藏的祖先目录是当前目录自身，或是当前目录的上级祖先，
+                    // 说明用户已经身处于该隐藏目录内部（例如通过地址栏输入进入），
+                    // 此时不应因上级被隐藏而过滤当前目录内的文件！
+                    if (cur != null && (cur == curr || cur.startsWith("$curr/"))) {
+                        // 忽略此祖先的隐藏限制，继续向上检查
+                        continue
+                    }
+                    return true
+                }
             }
             return false
         }

@@ -28,7 +28,7 @@ data class LocalUiState(
             // 不显示隐藏文件时过滤掉以 . 开头的条目，以及通过连击隐藏的项目
             val visible = files
                 .filter { if (showHiddenFiles) true else !it.name.startsWith(".") }
-                .filter { !com.example.myfile.data.prefs.HiddenItemStore.isHidden(it.path, hiddenPaths) }
+                .filter { !com.example.myfile.data.prefs.HiddenItemStore.isHidden(it.path, hiddenPaths, currentDir.absolutePath) }
             val dirs = visible.filter { it.isDirectory }
             val fs = visible.filter { !it.isDirectory }
             val cmp: Comparator<FileEntry> = when (sortMode) {

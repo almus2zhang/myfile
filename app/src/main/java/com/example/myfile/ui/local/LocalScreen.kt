@@ -925,11 +925,49 @@ fun LocalScreen(
                             val trailingMenu: @Composable () -> Unit = {
                                 if (!state.multiSelectMode) {
                                     var showMenu by remember { mutableStateOf(false) }
+                                    val scope = rememberCoroutineScope()
+                                    var clickCount by remember(entry.path) { mutableIntStateOf(0) }
+                                    var lastClickTime by remember(entry.path) { mutableLongStateOf(0L) }
+                                    var openMenuJob by remember(entry.path) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                                     Box {
-                                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp)) {
+                                        IconButton(
+                                            onClick = {
+                                                val now = System.currentTimeMillis()
+                                                if (now - lastClickTime < 700L) {
+                                                    clickCount++
+                                                } else {
+                                                    clickCount = 1
+                                                }
+                                                lastClickTime = now
+                                                openMenuJob?.cancel()
+
+                                                if (clickCount >= 6) {
+                                                    clickCount = 0
+                                                    lastClickTime = 0L
+                                                    showMenu = false
+                                                    vm.hideItem(entry.path)
+                                                    android.widget.Toast.makeText(context, "已隐藏: ${entry.name}", android.widget.Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    openMenuJob = scope.launch {
+                                                        kotlinx.coroutines.delay(if (clickCount == 1) 200L else 350L)
+                                                        showMenu = true
+                                                        clickCount = 0
+                                                        lastClickTime = 0L
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp)
+                                        ) {
                                             Icon(Icons.Filled.MoreVert, contentDescription = "更多", modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 18.dp else 22.dp))
                                         }
-                                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                        DropdownMenu(
+                                            expanded = showMenu,
+                                            onDismissRequest = {
+                                                showMenu = false
+                                                clickCount = 0
+                                                lastClickTime = 0L
+                                            }
+                                        ) {
                                             if (!entry.isDirectory) {
                                                 if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {
                                                     DropdownMenuItem(text = { Text("查看压缩包") }, leadingIcon = { Icon(Icons.Filled.FolderZip, null) }, onClick = { showMenu = false; viewingArchiveEntry = entry })
