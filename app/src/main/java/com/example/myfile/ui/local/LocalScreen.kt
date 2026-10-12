@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -1205,6 +1206,32 @@ fun LocalScreen(
     // 手动输入路径进入对话框（支持进入隐藏路径）
     if (showManualPathDialog) {
         val curDir = state.currentDir
+        val pathFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+        val onConfirmPath = {
+            val input = manualPathInput.trim()
+            if (input.isNotBlank()) {
+                val target = if (input.startsWith("/")) {
+                    File(input)
+                } else {
+                    File(curDir, input)
+                }
+                showManualPathDialog = false
+                if (target.exists() && target.isDirectory) {
+                    vm.navigateTo(target)
+                } else {
+                    android.widget.Toast.makeText(context, "目录不存在或无法访问: ${target.absolutePath}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(120L)
+            pathFocusRequester.requestFocus()
+            keyboard?.show()
+        }
+
         AlertDialog(
             onDismissRequest = { showManualPathDialog = false },
             title = {
@@ -1224,7 +1251,15 @@ fun LocalScreen(
                         label = { Text("相对或绝对路径") },
                         placeholder = { Text("如 subfolder 或 /storage/emulated/0/...") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Go
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onGo = { onConfirmPath() }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(pathFocusRequester)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -1235,24 +1270,7 @@ fun LocalScreen(
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val input = manualPathInput.trim()
-                        if (input.isNotBlank()) {
-                            val target = if (input.startsWith("/")) {
-                                File(input)
-                            } else {
-                                File(curDir, input)
-                            }
-                            showManualPathDialog = false
-                            if (target.exists() && target.isDirectory) {
-                                vm.navigateTo(target)
-                            } else {
-                                android.widget.Toast.makeText(context, "目录不存在或无法访问: ${target.absolutePath}", android.widget.Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }
-                ) {
+                TextButton(onClick = onConfirmPath) {
                     Text("进入")
                 }
             },

@@ -2838,6 +2838,28 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
     // 手动输入路径进入对话框（支持进入隐藏路径）
     if (showManualPathDialog) {
         val curPath = state.currentPath.trimEnd('/').ifEmpty { "/" }
+        val pathFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+        val onConfirmPath = {
+            val input = manualPathInput.trim()
+            if (input.isNotBlank()) {
+                val targetPath = if (input.startsWith("/")) {
+                    input
+                } else {
+                    if (curPath == "/") "/$input" else "$curPath/$input"
+                }
+                showManualPathDialog = false
+                vm.navigateTo(targetPath)
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(120L)
+            pathFocusRequester.requestFocus()
+            keyboard?.show()
+        }
+
         AlertDialog(
             onDismissRequest = { showManualPathDialog = false },
             title = {
@@ -2857,7 +2879,15 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                         label = { Text("相对或绝对路径") },
                         placeholder = { Text("如 subfolder 或 /other/path") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Go
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onGo = { onConfirmPath() }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(pathFocusRequester)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -2868,20 +2898,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val input = manualPathInput.trim()
-                        if (input.isNotBlank()) {
-                            val targetPath = if (input.startsWith("/")) {
-                                input
-                            } else {
-                                if (curPath == "/") "/$input" else "$curPath/$input"
-                            }
-                            showManualPathDialog = false
-                            vm.navigateTo(targetPath)
-                        }
-                    }
-                ) {
+                TextButton(onClick = onConfirmPath) {
                     Text("进入")
                 }
             },
