@@ -223,6 +223,8 @@ fun LocalScreen(
 
     val isRoot = vm.isAtRoot(state.currentDir)
     val localCrumbs = remember(state.currentDir) { buildLocalCrumbs(vm.rootDir, state.currentDir) }
+    var lastLocalCrumbClickCount by remember(state.currentDir) { mutableIntStateOf(0) }
+    var lastLocalCrumbClickTime by remember(state.currentDir) { mutableLongStateOf(0L) }
 
     BackHandler(enabled = !isRoot || state.multiSelectMode || onBack != null) {
         if (state.multiSelectMode) {
@@ -710,7 +712,36 @@ fun LocalScreen(
                                 Text(text = "›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 2.dp))
                             }
                             val isCurrent = index == localCrumbs.lastIndex
-                            Surface(shape = RoundedCornerShape(6.dp), color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent, modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { if (!isCurrent) { vm.saveScrollPosition(state.currentDir.absolutePath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset); vm.navigateTo(crumb.file) } }) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        if (isCurrent) {
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastLocalCrumbClickTime < 800L) {
+                                                lastLocalCrumbClickCount++
+                                            } else {
+                                                lastLocalCrumbClickCount = 1
+                                            }
+                                            lastLocalCrumbClickTime = now
+                                            if (lastLocalCrumbClickCount >= 5) {
+                                                lastLocalCrumbClickCount = 0
+                                                lastLocalCrumbClickTime = 0L
+                                                val unhiddenCount = vm.unhideUnder(state.currentDir.absolutePath)
+                                                if (unhiddenCount > 0) {
+                                                    android.widget.Toast.makeText(context, "已取消本目录及子目录下的所有隐藏 (共 $unhiddenCount 项)", android.widget.Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    android.widget.Toast.makeText(context, "当前目录下无隐藏项目", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        } else {
+                                            vm.saveScrollPosition(state.currentDir.absolutePath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                            vm.navigateTo(crumb.file)
+                                        }
+                                    }
+                            ) {
                                 Text(text = crumb.name, color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                             }
                         }
@@ -1008,7 +1039,14 @@ fun LocalScreen(
     }
     propertiesEntry?.let { entry ->
         val vProg = progressMap[entry.path]
-        com.example.myfile.ui.components.FilePropertiesDialog(entry = entry, accountName = null, videoDurationMs = vProg?.durationMs, videoPositionMs = vProg?.positionMs, onDismiss = { propertiesEntry = null })
+        com.example.myfile.ui.components.FilePropertiesDialog(
+            entry = entry,
+            accountName = null,
+            videoDurationMs = vProg?.durationMs,
+            videoPositionMs = vProg?.positionMs,
+            onHide = { vm.hideItem(entry.path) },
+            onDismiss = { propertiesEntry = null }
+        )
     }
     // 单项删除确认对话框
     deletingEntry?.let { entry ->

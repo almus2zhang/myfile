@@ -1153,6 +1153,8 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // 第二行：搜索模式下显示搜索框，否则显示路径面包屑
             val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
+            var lastCrumbClickCount by remember(state.currentPath) { mutableIntStateOf(0) }
+            var lastCrumbClickTime by remember(state.currentPath) { mutableLongStateOf(0L) }
             if (searchMode) {
                 // ===== 搜索框（替代面包屑位置）=====
                 Surface(
@@ -1318,6 +1320,24 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                             if (!isCurrent) {
                                                 vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
                                                 vm.navigateTo(crumb.path)
+                                            } else {
+                                                val now = System.currentTimeMillis()
+                                                if (now - lastCrumbClickTime < 800L) {
+                                                    lastCrumbClickCount++
+                                                } else {
+                                                    lastCrumbClickCount = 1
+                                                }
+                                                lastCrumbClickTime = now
+                                                if (lastCrumbClickCount >= 5) {
+                                                    lastCrumbClickCount = 0
+                                                    lastCrumbClickTime = 0L
+                                                    val unhiddenCount = vm.unhideUnder(state.currentPath)
+                                                    if (unhiddenCount > 0) {
+                                                        android.widget.Toast.makeText(context, "已取消本目录及子目录下的所有隐藏 (共 $unhiddenCount 项)", android.widget.Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        android.widget.Toast.makeText(context, "当前目录下无隐藏项目", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
                                             }
                                         }
                                 ) {
@@ -2574,6 +2594,7 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                     }
                 }
             } else null,
+            onHide = { vm.hideItem(entry.path) },
             onDismiss = { propertiesEntry = null }
         )
     }

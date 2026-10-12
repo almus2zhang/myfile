@@ -20,12 +20,15 @@ data class LocalUiState(
     val multiSelectMode: Boolean = false,
     val message: String? = null,
     val isRefreshing: Boolean = false,
-    val showHiddenFiles: Boolean = false
+    val showHiddenFiles: Boolean = false,
+    val hiddenPaths: Set<String> = emptySet()
 ) {
     val sortedFiles: List<FileEntry>
         get() {
-            // 不显示隐藏文件时过滤掉以 . 开头的条目
-            val visible = if (showHiddenFiles) files else files.filter { !it.name.startsWith(".") }
+            // 不显示隐藏文件时过滤掉以 . 开头的条目，以及通过连击隐藏的项目
+            val visible = files
+                .filter { if (showHiddenFiles) true else !it.name.startsWith(".") }
+                .filter { !com.example.myfile.data.prefs.HiddenItemStore.isHidden(it.path, hiddenPaths) }
             val dirs = visible.filter { it.isDirectory }
             val fs = visible.filter { !it.isDirectory }
             val cmp: Comparator<FileEntry> = when (sortMode) {
@@ -42,6 +45,7 @@ data class LocalUiState(
 
 class LocalViewModel : ViewModel() {
     private val repo = MyApp.instance.localRepo
+    private val hiddenItemStore = MyApp.instance.hiddenItemStore
     val rootDir: File = Environment.getExternalStorageDirectory()
     private val _state = MutableStateFlow(LocalUiState(currentDir = rootDir))
     val state: StateFlow<LocalUiState> = _state.asStateFlow()
@@ -125,13 +129,31 @@ class LocalViewModel : ViewModel() {
 
     init {
         val (mode, asc) = getFolderSort(rootDir.absolutePath)
-        _state.value = _state.value.copy(sortMode = mode, sortAsc = asc)
+        val hiddenSet = hiddenItemStore.getHiddenPaths(com.example.myfile.data.prefs.HiddenItemStore.LOCAL_STORAGE_KEY)
+        _state.value = _state.value.copy(sortMode = mode, sortAsc = asc, hiddenPaths = hiddenSet)
         // 加载根目录的视图偏好
         loadFolderPrefs(rootDir.absolutePath)
         _state.value = _state.value.copy(
             showHiddenFiles = viewModeStore.currentFolderPrefs.value.showHiddenFiles
         )
         refresh()
+    }
+
+    /** 隐藏单个路径（文件夹或文件） */
+    fun hideItem(path: String) {
+        val key = com.example.myfile.data.prefs.HiddenItemStore.LOCAL_STORAGE_KEY
+        hiddenItemStore.hideItem(key, path)
+        _state.value = _state.value.copy(hiddenPaths = hiddenItemStore.getHiddenPaths(key))
+    }
+
+    /** 取消当前目录及其所有子目录下全部隐藏项目 */
+    fun unhideUnder(dirPath: String): Int {
+        val key = com.example.myfile.data.prefs.HiddenItemStore.LOCAL_STORAGE_KEY
+        val count = hiddenItemStore.unhideUnder(key, dirPath)
+        if (count > 0) {
+            _state.value = _state.value.copy(hiddenPaths = hiddenItemStore.getHiddenPaths(key))
+        }
+        return count
     }
 
     private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()

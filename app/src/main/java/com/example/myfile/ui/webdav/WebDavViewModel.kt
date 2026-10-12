@@ -31,7 +31,8 @@ data class WebDavUiState(
     val selected: Set<String> = emptySet(),
     val multiSelectMode: Boolean = false,
     val message: String? = null,
-    val showHiddenFiles: Boolean = false
+    val showHiddenFiles: Boolean = false,
+    val hiddenPaths: Set<String> = emptySet()
 ) {
     /** 排序后的文件列表：目录始终在前，然后按选定字段排序（隐藏文件可选过滤） */
     val sortedFiles: List<FileEntry>
@@ -42,8 +43,10 @@ data class WebDavUiState(
      * 供主列表与搜索结果共用，保证搜索结果的排序行为与主视图一致。
      */
     fun sortEntries(source: List<FileEntry>): List<FileEntry> {
-        // 不显示隐藏文件时过滤掉以 . 开头的条目
-        val visible = if (showHiddenFiles) source else source.filter { !it.name.startsWith(".") }
+        // 不显示隐藏文件时过滤掉以 . 开头的条目，以及通过连击隐藏的项目
+        val visible = source
+            .filter { if (showHiddenFiles) true else !it.name.startsWith(".") }
+            .filter { !com.example.myfile.data.prefs.HiddenItemStore.isHidden(it.path, hiddenPaths) }
         val dirs = visible.filter { it.isDirectory }
         val fs = visible.filter { !it.isDirectory }
         val cmp = comparator()
@@ -72,6 +75,7 @@ class WebDavViewModel : ViewModel() {
     private val repo = MyApp.instance.webDavRepository
     private val pathStore = MyApp.instance.accountPathStore
     private val viewModeStore = MyApp.instance.viewModeStore
+    private val hiddenItemStore = MyApp.instance.hiddenItemStore
 
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
@@ -166,7 +170,8 @@ class WebDavViewModel : ViewModel() {
                 // 加载该目录的视图偏好
                 if (cur != null) loadFolderPrefs(cur.id, initialPath)
                 val targetPath = if (prev.currentAccount != null) prev.currentPath else initialPath
-                _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = targetPath, sortMode = mode, sortAsc = asc)
+                val hiddenSet = if (cur != null) hiddenItemStore.getHiddenPaths(com.example.myfile.data.prefs.HiddenItemStore.buildWebDavKey(cur.id)) else emptySet()
+                _state.value = prev.copy(accounts = list, currentAccount = cur, currentPath = targetPath, sortMode = mode, sortAsc = asc, hiddenPaths = hiddenSet)
                 // 仅当从未加载过账户或账户列表发生变化时才自动 refresh，避免 init 死循环
                 if (!initialized && cur != null) {
                     initialized = true
@@ -203,6 +208,7 @@ class WebDavViewModel : ViewModel() {
         val targetPath = if (account.rememberLastPath) pathStore.getLastPath(account.id) else "/"
         val (mode, asc) = getFolderSort(account.id, targetPath)
         loadFolderPrefs(account.id, targetPath)
+        val hiddenSet = hiddenItemStore.getHiddenPaths(com.example.myfile.data.prefs.HiddenItemStore.buildWebDavKey(account.id))
         // 先清空文件列表、停止loading（避免转圈残留），再触发新的刷新
         _state.value = _state.value.copy(
             currentAccount = account,
@@ -213,10 +219,30 @@ class WebDavViewModel : ViewModel() {
             multiSelectMode = false,
             files = emptyList(),
             loading = false,
-            error = null
+            error = null,
+            hiddenPaths = hiddenSet
         )
         refresh()
         checkAutoSyncIndex(account)
+    }
+
+    /** 隐藏单个路径（文件夹或文件） */
+    fun hideItem(path: String) {
+        val acc = _state.value.currentAccount ?: return
+        val key = com.example.myfile.data.prefs.HiddenItemStore.buildWebDavKey(acc.id)
+        hiddenItemStore.hideItem(key, path)
+        _state.value = _state.value.copy(hiddenPaths = hiddenItemStore.getHiddenPaths(key))
+    }
+
+    /** 取消当前目录及其所有子目录下全部隐藏项目 */
+    fun unhideUnder(dirPath: String): Int {
+        val acc = _state.value.currentAccount ?: return 0
+        val key = com.example.myfile.data.prefs.HiddenItemStore.buildWebDavKey(acc.id)
+        val count = hiddenItemStore.unhideUnder(key, dirPath)
+        if (count > 0) {
+            _state.value = _state.value.copy(hiddenPaths = hiddenItemStore.getHiddenPaths(key))
+        }
+        return count
     }
 
     fun open(entry: FileEntry) {

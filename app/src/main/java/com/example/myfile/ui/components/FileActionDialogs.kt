@@ -6,6 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -119,9 +120,17 @@ fun FilePropertiesDialog(
     downloadHint: String? = null,
     onDownload: (() -> Unit)? = null,
     onUpload: (() -> Unit)? = null,
+    onHide: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val handleHide = if (onHide != null) {
+        {
+            onHide()
+            Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
+            onDismiss()
+        }
+    } else null
     val visualType = resolveVisualType(entry.isDirectory, entry.name)
     val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     val numFmt = remember { NumberFormat.getNumberInstance(Locale.getDefault()) }
@@ -340,7 +349,8 @@ fun FilePropertiesDialog(
                             PropertyItem(
                                 label = "远程路径",
                                 value = entry.path,
-                                isPath = true
+                                isPath = true,
+                                onPathFiveClick = handleHide
                             )
                         }
                     }
@@ -481,7 +491,7 @@ fun FilePropertiesDialog(
                         FileSource.WEBDAV -> if (accountName != null) "WebDAV 网盘 ($accountName)" else "WebDAV 网盘"
                     }
                     PropertyItem(label = "存储位置", value = locationDesc)
-                    PropertyItem(label = "完整路径", value = entry.path, isPath = true)
+                    PropertyItem(label = "完整路径", value = entry.path, isPath = true, onPathFiveClick = handleHide)
                 }
             }
         },
@@ -542,10 +552,38 @@ fun FilePropertiesDialog(
 private fun PropertyItem(
     label: String,
     value: String,
-    isPath: Boolean = false
+    isPath: Boolean = false,
+    onPathFiveClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    Column(modifier = Modifier.fillMaxWidth()) {
+    var clickCount by remember { mutableIntStateOf(0) }
+    var lastClickTime by remember { mutableLongStateOf(0L) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onPathFiveClick != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastClickTime < 800L) {
+                            clickCount++
+                        } else {
+                            clickCount = 1
+                        }
+                        lastClickTime = now
+                        if (clickCount >= 5) {
+                            clickCount = 0
+                            lastClickTime = 0L
+                            onPathFiveClick()
+                        }
+                    }
+                } else Modifier
+            )
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
