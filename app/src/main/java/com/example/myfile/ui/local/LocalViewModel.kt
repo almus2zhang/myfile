@@ -50,6 +50,8 @@ class LocalViewModel : ViewModel() {
     private val _state = MutableStateFlow(LocalUiState(currentDir = rootDir))
     val state: StateFlow<LocalUiState> = _state.asStateFlow()
 
+    private var refreshJob: kotlinx.coroutines.Job? = null
+
     private val viewModeStore = MyApp.instance.viewModeStore
 
     /** 当前目录的视图偏好（视图/缩略图/隐藏文件/间隔线），按目录路径记忆 */
@@ -184,15 +186,28 @@ class LocalViewModel : ViewModel() {
 
     fun refresh(): kotlinx.coroutines.Job {
         val dir = _state.value.currentDir
-        return viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        refreshJob?.cancel()
+        val job = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _state.value = _state.value.copy(isRefreshing = true)
-            val list = repo.list(dir)
-            _state.value = _state.value.copy(files = list, currentDir = dir, isRefreshing = false)
+            try {
+                val list = repo.list(dir)
+                if (_state.value.currentDir == dir) {
+                    _state.value = _state.value.copy(files = list, currentDir = dir, isRefreshing = false)
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (_state.value.currentDir == dir) {
+                    _state.value = _state.value.copy(isRefreshing = false)
+                }
+            }
         }
+        refreshJob = job
+        return job
     }
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
+            refreshJob?.cancel()
             val (mode, asc) = getFolderSort(entry.path)
             loadFolderPrefs(entry.path)
             _state.value = _state.value.copy(
@@ -200,13 +215,16 @@ class LocalViewModel : ViewModel() {
                 sortMode = mode,
                 sortAsc = asc,
                 selected = emptySet(),
-                multiSelectMode = false
+                multiSelectMode = false,
+                files = emptyList(),
+                isRefreshing = true
             )
             refresh()
         }
     }
 
     fun navigateTo(dir: File) {
+        refreshJob?.cancel()
         val (mode, asc) = getFolderSort(dir.absolutePath)
         loadFolderPrefs(dir.absolutePath)
         _state.value = _state.value.copy(
@@ -214,7 +232,9 @@ class LocalViewModel : ViewModel() {
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
-            multiSelectMode = false
+            multiSelectMode = false,
+            files = emptyList(),
+            isRefreshing = true
         )
         refresh()
     }
@@ -222,6 +242,7 @@ class LocalViewModel : ViewModel() {
     fun goUp() {
         if (isAtRoot()) return
         val parent = _state.value.currentDir.parentFile ?: return
+        refreshJob?.cancel()
         val (mode, asc) = getFolderSort(parent.absolutePath)
         loadFolderPrefs(parent.absolutePath)
         _state.value = _state.value.copy(
@@ -229,7 +250,9 @@ class LocalViewModel : ViewModel() {
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
-            multiSelectMode = false
+            multiSelectMode = false,
+            files = emptyList(),
+            isRefreshing = true
         )
         refresh()
     }

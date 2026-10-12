@@ -80,6 +80,8 @@ class WebDavViewModel : ViewModel() {
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
 
+    private var refreshJob: kotlinx.coroutines.Job? = null
+
     /** 当前目录的视图偏好（视图/缩略图/隐藏文件/间隔线），按目录路径记忆 */
     val currentFolderPrefs: StateFlow<com.example.myfile.data.prefs.FolderViewPrefs> =
         viewModeStore.currentFolderPrefs
@@ -247,6 +249,7 @@ class WebDavViewModel : ViewModel() {
 
     fun open(entry: FileEntry) {
         if (entry.isDirectory) {
+            refreshJob?.cancel()
             _state.value.currentAccount?.let {
                 if (it.rememberLastPath) pathStore.saveLastPath(it.id, entry.path)
             }
@@ -258,7 +261,10 @@ class WebDavViewModel : ViewModel() {
                 sortMode = mode,
                 sortAsc = asc,
                 selected = emptySet(),
-                multiSelectMode = false
+                multiSelectMode = false,
+                files = emptyList(),
+                loading = true,
+                error = null
             )
             refresh()
         }
@@ -276,6 +282,7 @@ class WebDavViewModel : ViewModel() {
         val path = _state.value.currentPath.trimEnd('/')
         if (path.isEmpty() || path == "/") return
         val parent = path.substringBeforeLast('/').ifEmpty { "/" }
+        refreshJob?.cancel()
         _state.value.currentAccount?.let {
             if (it.rememberLastPath) pathStore.saveLastPath(it.id, parent)
         }
@@ -287,7 +294,10 @@ class WebDavViewModel : ViewModel() {
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
-            multiSelectMode = false
+            multiSelectMode = false,
+            files = emptyList(),
+            loading = true,
+            error = null
         )
         refresh()
     }
@@ -295,6 +305,7 @@ class WebDavViewModel : ViewModel() {
     /** 面包屑跳转到指定路径 */
     fun navigateTo(path: String) {
         val normalized = path.trim().ifEmpty { "/" }
+        refreshJob?.cancel()
         _state.value.currentAccount?.let {
             if (it.rememberLastPath) pathStore.saveLastPath(it.id, normalized)
         }
@@ -306,7 +317,10 @@ class WebDavViewModel : ViewModel() {
             sortMode = mode,
             sortAsc = asc,
             selected = emptySet(),
-            multiSelectMode = false
+            multiSelectMode = false,
+            files = emptyList(),
+            loading = true,
+            error = null
         )
         refresh()
     }
@@ -487,12 +501,17 @@ class WebDavViewModel : ViewModel() {
     fun refresh(): kotlinx.coroutines.Job {
         val acc = _state.value.currentAccount ?: return viewModelScope.launch {}
         val path = _state.value.currentPath
-        return viewModelScope.launch {
+        refreshJob?.cancel()
+        val job = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             try {
                 val files = repo.list(acc, path)
-                _state.value = _state.value.copy(files = files, loading = false)
+                // 仅当当前路径和账户仍匹配时才写回状态，防止慢网络/大目录请求覆盖新跳转的目录
+                if (_state.value.currentPath == path && _state.value.currentAccount?.id == acc.id) {
+                    _state.value = _state.value.copy(files = files, loading = false)
+                }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e("WebDavVM", "refresh failed", e)
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 // 区分直连失败和跳转地址不可达
@@ -501,9 +520,13 @@ class WebDavViewModel : ViewModel() {
                 } else {
                     "无法连接 ${acc.url}，请检查网络或配置: $msg"
                 }
-                _state.value = _state.value.copy(loading = false, error = errorMsg)
+                if (_state.value.currentPath == path && _state.value.currentAccount?.id == acc.id) {
+                    _state.value = _state.value.copy(loading = false, error = errorMsg)
+                }
             }
         }
+        refreshJob = job
+        return job
     }
 
     // ---------- WEBDAV 索引搜索 ----------
