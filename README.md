@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-blue.svg)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-blueviolet.svg)](https://developer.android.com/jetpack/compose)
-[![Release](https://img.shields.io/badge/Release-v1.3.3-orange.svg)](https://github.com/almus2zhang/myfile/releases)
+[![Release](https://img.shields.io/badge/Release-v1.3.4-orange.svg)](https://github.com/almus2zhang/myfile/releases)
 
 ---
 
@@ -37,8 +37,8 @@
 ### 🧭 3. 路径面包屑与手动路径直达（支持隐藏路径）
 - **层级穿梭**：支持点击面包屑任意层级回跳；
 - **空白区域路径直达**：点击面包屑最右侧空白区域（或编辑图标），弹出手动路径跳转对话框，可直接输入相对路径或绝对路径（支持直达被隐藏的隐蔽文件夹）；
-- **极速隐蔽隐藏**：在文件夹属性的「完整路径」或文件属性的「远程路径」上**快速连击 5 次**，即可一键隐藏该文件夹或文件；
-- **面包屑批量解除**：在顶部面包屑路径末位（当前目录）**快速连击 5 次**，一键取消本目录及子目录下的所有隐藏状态。
+- **条目长按隐藏**：长按任意文件或文件夹条目右侧的「三个点」图标 **2 秒**（带轻微震动反馈，短按仍为打开菜单），即可一键隐蔽隐藏该条目；亦可在文件夹属性「完整路径」或文件属性「远程路径」上快速连击 5 次隐藏；
+- **面包屑批量解除**：在顶部面包屑路径末位（当前目录）**长按 2 秒**（带轻微震动反馈），即可一键解除本目录及子目录下的所有隐藏状态。
 
 ### 📦 4. 全格式压缩包内置浏览与解压
 无需安装第三方解压软件，直接点击压缩包即可入内浏览：

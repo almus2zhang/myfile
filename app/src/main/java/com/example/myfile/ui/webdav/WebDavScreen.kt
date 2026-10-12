@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.delay
@@ -77,6 +79,7 @@ import java.io.File
 @Composable
 fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val state by vm.state.collectAsState()
     val clipboardItems by com.example.myfile.core.TransferClipboard.items.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -1169,8 +1172,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // 第二行：搜索模式下显示搜索框，否则显示路径面包屑
             val crumbs = remember(state.currentPath) { buildCrumbs(state.currentPath) }
-            var lastCrumbClickCount by remember(state.currentPath) { mutableIntStateOf(0) }
-            var lastCrumbClickTime by remember(state.currentPath) { mutableLongStateOf(0L) }
             if (searchMode) {
                 // ===== 搜索框（替代面包屑位置）=====
                 Surface(
@@ -1390,30 +1391,52 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .clickable {
+                                        .then(
                                             if (!isCurrent) {
-                                                vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
-                                                vm.navigateTo(crumb.path)
-                                            } else {
-                                                val now = System.currentTimeMillis()
-                                                if (now - lastCrumbClickTime < 800L) {
-                                                    lastCrumbClickCount++
-                                                } else {
-                                                    lastCrumbClickCount = 1
+                                                Modifier.clickable {
+                                                    vm.saveScrollPosition(state.currentPath, gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset)
+                                                    vm.navigateTo(crumb.path)
                                                 }
-                                                lastCrumbClickTime = now
-                                                if (lastCrumbClickCount >= 5) {
-                                                    lastCrumbClickCount = 0
-                                                    lastCrumbClickTime = 0L
-                                                    val unhiddenCount = vm.unhideUnder(state.currentPath)
-                                                    if (unhiddenCount > 0) {
-                                                        android.widget.Toast.makeText(context, "已取消本目录及子目录下的所有隐藏 (共 $unhiddenCount 项)", android.widget.Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        android.widget.Toast.makeText(context, "当前目录下无隐藏项目", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Modifier.pointerInput(state.currentPath) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                                        down.consume()
+                                                        val downPosition = down.position
+                                                        val pointerId = down.id
+
+                                                        val unhideJob = scope.launch {
+                                                            delay(2000L) // 2秒
+                                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                            val unhiddenCount = vm.unhideUnder(state.currentPath)
+                                                            if (unhiddenCount > 0) {
+                                                                android.widget.Toast.makeText(context, "已取消本目录及子目录下的所有隐藏 (共 $unhiddenCount 项)", android.widget.Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                android.widget.Toast.makeText(context, "当前目录下无隐藏项目", android.widget.Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+
+                                                        try {
+                                                            while (true) {
+                                                                val event = awaitPointerEvent()
+                                                                val change = event.changes.firstOrNull { it.id == pointerId }
+                                                                if (change == null || !change.pressed) {
+                                                                    change?.consume()
+                                                                    break
+                                                                }
+                                                                change.consume()
+                                                                // 允许手指晃动与微小位移（容差 100px）
+                                                                if ((change.position - downPosition).getDistance() > 100f) {
+                                                                    break
+                                                                }
+                                                            }
+                                                        } finally {
+                                                            unhideJob.cancel()
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
+                                        )
                                 ) {
                                     Text(
                                         text = crumb.name,
@@ -1976,7 +1999,6 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                     if (!state.multiSelectMode) {
                                         var showMenu by remember { mutableStateOf(false) }
                                         var isPressed by remember { mutableStateOf(false) }
-                                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                                         val itemSize = if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp
                                         val iconSize = if (viewMode == ViewMode.COMPACT) 18.dp else 22.dp
 
@@ -1987,29 +2009,49 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                                     .clip(RoundedCornerShape(50))
                                                     .background(if (isPressed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else Color.Transparent)
                                                     .pointerInput(entry.path) {
-                                                        detectTapGestures(
-                                                            onPress = {
-                                                                isPressed = true
-                                                                var hiddenTriggered = false
-                                                                val hideJob = scope.launch {
-                                                                    delay(3000L)
-                                                                    hiddenTriggered = true
-                                                                    showMenu = false
-                                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                                                    vm.hideItem(entry.path)
-                                                                    Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                                val released = try {
-                                                                    tryAwaitRelease()
-                                                                } finally {
-                                                                    isPressed = false
-                                                                }
-                                                                hideJob.cancel()
-                                                                if (released && !hiddenTriggered) {
-                                                                    showMenu = true
-                                                                }
+                                                        awaitEachGesture {
+                                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                                            down.consume()
+                                                            val downPosition = down.position
+                                                            val pointerId = down.id
+                                                            var hiddenTriggered = false
+                                                            var isReleased = false
+
+                                                            isPressed = true
+
+                                                            val hideJob = scope.launch {
+                                                                delay(2000L) // 2秒
+                                                                hiddenTriggered = true
+                                                                isPressed = false
+                                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                                vm.hideItem(entry.path)
+                                                                Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
                                                             }
-                                                        )
+
+                                                            try {
+                                                                while (true) {
+                                                                    val event = awaitPointerEvent()
+                                                                    val change = event.changes.firstOrNull { it.id == pointerId }
+                                                                    if (change == null || !change.pressed) {
+                                                                        change?.consume()
+                                                                        isReleased = true
+                                                                        break
+                                                                    }
+                                                                    change.consume()
+                                                                    // 允许手指晃动与微小位移（容差 100px），避免微小位移导致长按中断
+                                                                    if ((change.position - downPosition).getDistance() > 100f) {
+                                                                        break
+                                                                    }
+                                                                }
+                                                            } finally {
+                                                                isPressed = false
+                                                                hideJob.cancel()
+                                                            }
+
+                                                            if (isReleased && !hiddenTriggered) {
+                                                                showMenu = true
+                                                            }
+                                                        }
                                                     },
                                                 contentAlignment = Alignment.Center
                                             ) {
