@@ -21,8 +21,12 @@ import com.example.myfile.ui.components.FileCompactItem
 import com.example.myfile.ui.components.TextEditorDialog
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1971,52 +1975,53 @@ fun WebDavScreen(vm: WebDavViewModel = viewModel(), onNavigateToLocal: () -> Uni
                                 val trailingMenu: @Composable () -> Unit = {
                                     if (!state.multiSelectMode) {
                                         var showMenu by remember { mutableStateOf(false) }
-                                        val scope = rememberCoroutineScope()
-                                        var clickCount by remember(entry.path) { mutableIntStateOf(0) }
-                                        var lastClickTime by remember(entry.path) { mutableLongStateOf(0L) }
-                                        var openMenuJob by remember(entry.path) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-                                        Box {
-                                            IconButton(
-                                                onClick = {
-                                                    val now = System.currentTimeMillis()
-                                                    if (now - lastClickTime < 700L) {
-                                                        clickCount++
-                                                    } else {
-                                                        clickCount = 1
-                                                    }
-                                                    lastClickTime = now
-                                                    openMenuJob?.cancel()
+                                        var isPressed by remember { mutableStateOf(false) }
+                                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                                        val itemSize = if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp
+                                        val iconSize = if (viewMode == ViewMode.COMPACT) 18.dp else 22.dp
 
-                                                    if (clickCount >= 6) {
-                                                        clickCount = 0
-                                                        lastClickTime = 0L
-                                                        showMenu = false
-                                                        vm.hideItem(entry.path)
-                                                        Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        openMenuJob = scope.launch {
-                                                            kotlinx.coroutines.delay(if (clickCount == 1) 200L else 350L)
-                                                            showMenu = true
-                                                            clickCount = 0
-                                                            lastClickTime = 0L
-                                                        }
-                                                    }
-                                                },
-                                                modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 26.dp else 36.dp)
+                                        Box {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(itemSize)
+                                                    .clip(RoundedCornerShape(50))
+                                                    .background(if (isPressed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else Color.Transparent)
+                                                    .pointerInput(entry.path) {
+                                                        detectTapGestures(
+                                                            onPress = {
+                                                                isPressed = true
+                                                                var hiddenTriggered = false
+                                                                val hideJob = scope.launch {
+                                                                    delay(3000L)
+                                                                    hiddenTriggered = true
+                                                                    showMenu = false
+                                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                                    vm.hideItem(entry.path)
+                                                                    Toast.makeText(context, "已隐藏: ${entry.name}", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                                val released = try {
+                                                                    tryAwaitRelease()
+                                                                } finally {
+                                                                    isPressed = false
+                                                                }
+                                                                hideJob.cancel()
+                                                                if (released && !hiddenTriggered) {
+                                                                    showMenu = true
+                                                                }
+                                                            }
+                                                        )
+                                                    },
+                                                contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
                                                     Icons.Filled.MoreVert,
                                                     contentDescription = "更多",
-                                                    modifier = Modifier.size(if (viewMode == ViewMode.COMPACT) 18.dp else 22.dp)
+                                                    modifier = Modifier.size(iconSize)
                                                 )
                                             }
                                             DropdownMenu(
                                                 expanded = showMenu,
-                                                onDismissRequest = {
-                                                    showMenu = false
-                                                    clickCount = 0
-                                                    lastClickTime = 0L
-                                                }
+                                                onDismissRequest = { showMenu = false }
                                             ) {
                                                 if (!entry.isDirectory) {
                                                     if (com.example.myfile.core.ArchiveHelper.isArchive(entry.name)) {
