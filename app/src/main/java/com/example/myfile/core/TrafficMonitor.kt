@@ -93,13 +93,20 @@ object TrafficMonitor {
         synchronized(this) {
             if (tickerJob?.isActive == true) return
             tickerJob = scope.launch {
+                var zeroCount = 0
                 while (isActive) {
                     delay(400)
                     calculateSpeeds()
                     if (recordsMap.isEmpty()) {
+                        zeroCount++
                         _totalDownloadSpeed.value = 0L
                         _activeTransfers.value = emptyList()
-                        break
+                        // 传输结束后持续采样 8 次 (约 3.2 秒)，确保 0 速率稳定写入历史序列，随后休眠
+                        if (zeroCount >= 8) {
+                            break
+                        }
+                    } else {
+                        zeroCount = 0
                     }
                 }
             }
@@ -188,6 +195,12 @@ object TrafficMonitor {
             _recentTransfers.value = curRecent
         }
         _activeTransfers.value = recordsMap.values.sortedByDescending { it.id }
+        if (recordsMap.isEmpty()) {
+            _totalDownloadSpeed.value = 0L
+            val now = System.currentTimeMillis()
+            val cutoff = now - 300_000L
+            _speedHistory.value = (_speedHistory.value + (now to 0L)).filter { it.first >= cutoff }
+        }
     }
 
     private fun guessCategory(request: Request): String {

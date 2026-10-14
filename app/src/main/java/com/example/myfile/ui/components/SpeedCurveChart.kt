@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -13,6 +15,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 /**
  * 滚动速度曲线图（带纵坐标 Y 轴刻度指示大小），支持保形单调三次埃尔米特样条曲线（PCHIP）、半透明渐变发光填充与时间窗口。
@@ -27,16 +30,23 @@ fun SpeedCurveChart(
 ) {
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
 
-    // 只取窗口内的数据点，并按时间升序排序
-    val now = System.currentTimeMillis()
+    // 内部平滑时钟驱动：每 200ms 刷新一次当前时间，即使网络速度为 0 也平滑驱动时间轴向左滚动
+    val liveTime by produceState(initialValue = System.currentTimeMillis()) {
+        while (true) {
+            delay(200L)
+            value = System.currentTimeMillis()
+        }
+    }
+
+    val now = liveTime
     val cutoff = now - windowMs
     val inWindow = speedHistory.filter { it.first >= cutoff }.sortedBy { it.first }
 
-    // 处理时间序列：合并过近采样点，并智能补齐起点与当前时间终点
+    // 处理时间序列：检测断档智能快速归零，并锚定当前时间右侧
     val prepared = prepareSpeedData(inWindow, cutoff, now)
 
-    // 平滑处理：对窗口内速度做移动平均（滑动窗口），消除瞬时毛刺
-    val smoothed = smoothSpeed(prepared, windowSize = 3)
+    // 平滑处理：仅对连续传输密集采样消除局部毛刺，0 速率严格保持为 0
+    val smoothed = smoothSpeed(prepared)
 
     val maxSpeed = (smoothed.maxOfOrNull { it.second } ?: 0L).coerceAtLeast(1024L)
     val midSpeed = maxSpeed / 2
@@ -111,17 +121,15 @@ fun SpeedCurveChart(
                 Offset(x, y)
             }
 
-            // 屏幕坐标去重与单调递增保证：若两点水平间距 < 2px，合并并保留更高速度点，杜绝斜率无限大或回弹
+            // 屏幕坐标单调递增保证：若两点水平间距极小，确保 X 轴严格单调向前微移，绝不丢弃下落归零点
             val pts = ArrayList<Offset>(rawPts.size)
             for (p in rawPts) {
                 if (pts.isEmpty()) {
                     pts.add(p)
                 } else {
                     val last = pts.last()
-                    if (p.x - last.x < 2f) {
-                        if (p.y < last.y) { // y 越小速度越高
-                            pts[pts.size - 1] = p
-                        }
+                    if (p.x <= last.x) {
+                        pts.add(Offset(last.x + 0.5f, p.y))
                     } else {
                         pts.add(p)
                     }
@@ -272,64 +280,103 @@ fun SpeedCurveChart(
  * 预处理时间窗口内的速度采样点：
  * 1. 若首个采样点晚于窗口起点，自动补齐从 0 开始的平滑爬升锚点；
  * 2. 合并 < 150ms 的密集采样点，防止重叠抖动；
- * 3. 若最新采样点距离当前时间超过 1s，延伸至当前时间保持图表右侧贴边。
+ * 3. 智能检测断档（采样间隔 > 1200ms）：前点非零时 400ms 内迅速坠落归零，断档全段锚定 0 速率，杜绝大斜坡；
+ * 4. 右侧贴边：距最新采样 > 400ms 时，400ms 快速归零并在当前时间 now 处锚定 0 速率。
  */
 private fun prepareSpeedData(
     data: List<Pair<Long, Long>>,
     cutoff: Long,
     now: Long
 ): List<Pair<Long, Long>> {
-    if (data.isEmpty()) return emptyList()
+    if (data.isEmpty()) {
+        return listOf(cutoff to 0L, now to 0L)
+    }
 
-    val result = ArrayList<Pair<Long, Long>>(data.size + 3)
+    val result = ArrayList<Pair<Long, Long>>(data.size * 2 + 4)
 
     val first = data.first()
     // 若中途开始传输，补齐 0 速率起点
-    if (first.first > cutoff + 1000L) {
+    if (first.first > cutoff + 500L) {
         result.add(cutoff to 0L)
-        if (first.first - 300L > cutoff) {
-            result.add((first.first - 300L) to 0L)
+        if (first.first - 400L > cutoff) {
+            result.add((first.first - 400L) to 0L)
         }
     }
 
     for (pt in data) {
-        if (result.isNotEmpty() && pt.first - result.last().first < 150L) {
-            val last = result.last()
-            result[result.size - 1] = pt.first to maxOf(last.second, pt.second)
-        } else {
-            result.add(pt)
+        if (result.isNotEmpty()) {
+            val (prevT, prevV) = result.last()
+            val dt = pt.first - prevT
+            if (dt < 150L) {
+                // <150ms 密集采样点合并，保留较高速度
+                result[result.size - 1] = pt.first to maxOf(prevV, pt.second)
+                continue
+            } else if (dt > 1200L) {
+                // 出现大于 1.2 秒的断档！说明前一次传输已结束或断流
+                if (prevV > 0L) {
+                    // 前点非零：400ms 内迅速坠落归零，不要形成长斜坡
+                    result.add((prevT + 400L) to 0L)
+                }
+                // 在新传输开始前 400ms 补齐 0（从 0 开始爬升）
+                if (pt.second > 0L && pt.first - 400L > prevT + 400L) {
+                    result.add((pt.first - 400L) to 0L)
+                }
+            }
         }
+        result.add(pt)
     }
 
-    val last = result.last()
-    if (now - last.first > 1000L) {
-        result.add(now to last.second)
+    // 终点闭合与当前实时时间对齐
+    val (lastT, lastV) = result.last()
+    if (now - lastT > 400L) {
+        if (lastV > 0L) {
+            // 最后一个历史采样点是非零（比如在 20M 处传输结束），400ms 内迅速坠落到 0
+            val dropT = minOf(lastT + 400L, now)
+            result.add(dropT to 0L)
+        }
+        // 当前时间 now 处锚定 0 速率
+        if (now > result.last().first) {
+            result.add(now to 0L)
+        }
     }
 
     return result
 }
 
 /**
- * 对速度序列做滑动窗口移动平均，消除瞬时毛刺，让曲线更平滑。
- * @param windowSize 移动平均窗口大小（采样点数，奇数最佳），越大越平滑。
+ * 局部移动平均平滑滤波：
+ * 仅对连续密集采样（时间间隔 <= maxIntervalMs）消除瞬时毛刺；
+ * 0 速率点严格保持为 0，绝不跨越断档或将 0 速率点向上抬升涂抹。
  */
 fun smoothSpeed(
     data: List<Pair<Long, Long>>,
-    windowSize: Int = 3
+    maxIntervalMs: Long = 800L
 ): List<Pair<Long, Long>> {
-    if (data.size < 3 || windowSize <= 1) return data
-    val half = windowSize / 2
-    val result = ArrayList<Pair<Long, Long>>(data.size)
-    for (i in data.indices) {
-        val start = (i - half).coerceAtLeast(0)
-        val end = (i + half).coerceAtMost(data.size - 1)
-        var sum = 0L
-        for (j in start..end) {
-            sum += data[j].second
+    if (data.size < 3) return data
+    val n = data.size
+    val result = ArrayList<Pair<Long, Long>>(n)
+    for (i in 0 until n) {
+        val (ti, vi) = data[i]
+        // 0 速率点纯净保持，杜绝向上抬升
+        if (vi == 0L) {
+            result.add(ti to 0L)
+            continue
         }
-        val avg = sum / (end - start + 1)
-        // 保留原始时间戳，仅平滑速度值
-        result.add(data[i].first to avg)
+
+        var sum = vi
+        var count = 1
+
+        if (i > 0 && (ti - data[i - 1].first <= maxIntervalMs)) {
+            sum += data[i - 1].second
+            count++
+        }
+        if (i < n - 1 && (data[i + 1].first - ti <= maxIntervalMs)) {
+            sum += data[i + 1].second
+            count++
+        }
+
+        val avg = sum / count
+        result.add(ti to avg)
     }
     return result
 }
